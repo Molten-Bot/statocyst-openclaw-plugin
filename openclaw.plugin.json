@@ -9,8 +9,11 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["baseUrl", "token"],
     "properties": {
+      "configFile": {
+        "type": "string",
+        "description": "Optional path to a JSON file containing plugin configuration"
+      },
       "baseUrl": {
         "type": "string",
         "description": "Statocyst API base URL, for example https://hub.example.com/v1"

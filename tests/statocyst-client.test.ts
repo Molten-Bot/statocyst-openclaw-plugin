@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -61,6 +64,13 @@ function testConfig() {
     pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
     pluginVersion: "0.1.0-test"
   };
+}
+
+function writeTempJSONFile(content: unknown): string {
+  const dir = mkdtempSync(join(tmpdir(), "statocyst-openclaw-plugin-"));
+  const filePath = join(dir, "config.json");
+  writeFileSync(filePath, JSON.stringify(content), "utf8");
+  return filePath;
 }
 
 function fetchOKSpy() {
@@ -993,7 +1003,49 @@ describe("StatocystClient", () => {
     ).rejects.toThrow("timed out waiting for skill_result");
   });
 
-  it("resolveConfig reads config and env values", () => {
+  it("resolveConfig reads config, file, and env values", () => {
+    const filePath = writeTempJSONFile({
+      baseUrl: "https://file.example.com/v1/",
+      token: "token-file",
+      sessionKey: "session-file",
+      timeoutMs: 2501,
+      pluginId: "plugin-file",
+      pluginPackage: "pkg-file",
+      pluginVersion: "9.9.9"
+    });
+
+    const resolvedFromFile = resolveConfig({
+      config: {
+        configFile: filePath
+      }
+    });
+    expect(resolvedFromFile).toEqual({
+      baseUrl: "https://file.example.com/v1",
+      token: "token-file",
+      sessionKey: "session-file",
+      timeoutMs: 2501,
+      pluginId: "plugin-file",
+      pluginPackage: "pkg-file",
+      pluginVersion: "9.9.9"
+    });
+
+    const resolvedFromEnvConfigFile = resolveConfig({
+      env: {
+        STATOCYST_CONFIG_FILE: filePath
+      }
+    });
+    expect(resolvedFromEnvConfigFile.token).toBe("token-file");
+
+    const resolvedInlineOverridesFile = resolveConfig({
+      config: {
+        configFile: filePath,
+        baseURL: "https://inline.example.com/v1/",
+        token: "token-inline"
+      }
+    });
+    expect(resolvedInlineOverridesFile.baseUrl).toBe("https://inline.example.com/v1");
+    expect(resolvedInlineOverridesFile.token).toBe("token-inline");
+
     const resolved = resolveConfig({
       config: {
         baseUrl: "https://hub.example.com/v1/",
@@ -1045,6 +1097,36 @@ describe("StatocystClient", () => {
       }
     });
     expect(resolvedZeroTimeout.timeoutMs).toBe(20000);
+  });
+
+  it("resolveConfig fails for unreadable or invalid config files", () => {
+    const missingPath = join(tmpdir(), "statocyst-openclaw-plugin-missing", "config.json");
+    expect(() =>
+      resolveConfig({
+        config: {
+          configFile: missingPath
+        }
+      })
+    ).toThrow("failed reading Statocyst plugin config file");
+
+    const invalidJSONPath = writeTempJSONFile({});
+    writeFileSync(invalidJSONPath, "{", "utf8");
+    expect(() =>
+      resolveConfig({
+        config: {
+          configFile: invalidJSONPath
+        }
+      })
+    ).toThrow("invalid Statocyst plugin config file");
+
+    const invalidShapePath = writeTempJSONFile(["bad-shape"]);
+    expect(() =>
+      resolveConfig({
+        config: {
+          configFile: invalidShapePath
+        }
+      })
+    ).toThrow("config file must contain a JSON object");
   });
 
   it("resolveConfig enforces baseUrl and token", () => {

@@ -48,10 +48,42 @@ Set plugin config under `plugins.entries.statocyst-openclaw.config`:
 
 Config fields:
 
-- `baseUrl` (required): Statocyst API base, including `/v1`
-- `token` (required): Statocyst bearer token for the current OpenClaw agent
+- `configFile` (optional): path to a JSON file with plugin config values
+- `baseUrl` (required unless `configFile` is provided): Statocyst API base, including `/v1`
+- `token` (required unless `configFile` is provided): Statocyst bearer token for the current OpenClaw agent
 - `sessionKey` (optional, default `main`): dedicated realtime session key
 - `timeoutMs` (optional, default `20000`, max `60000`): tool request timeout
+
+File-based config example:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "statocyst-openclaw": {
+        "enabled": true,
+        "config": {
+          "configFile": "/etc/molten/statocyst-openclaw.json"
+        }
+      }
+    }
+  }
+}
+```
+
+`/etc/molten/statocyst-openclaw.json`:
+
+```json
+{
+  "baseUrl": "https://hub.example.com/v1",
+  "token": "statocyst-agent-bearer-token",
+  "sessionKey": "main",
+  "timeoutMs": 20000
+}
+```
+
+You can also set `STATOCYST_CONFIG_FILE=/path/to/statocyst-openclaw.json` in the OpenClaw runtime environment.
+When both inline config and `configFile` are present, inline values take precedence.
 
 ## Statocyst usage registration
 

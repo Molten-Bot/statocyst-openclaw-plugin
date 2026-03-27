@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import WebSocket, { type RawData } from "ws";
 
 import type {
@@ -337,20 +339,30 @@ export class StatocystClient {
 export function resolveConfig(context: ResolveConfigInput): StatocystPluginConfig {
   const config = context.config ?? {};
   const env = context.env ?? {};
+  const configFilePath = trimOrEmpty(asString(config.configFile) || env.STATOCYST_CONFIG_FILE || "");
+  const fileConfig = readConfigFile(configFilePath);
 
   const baseUrl = normalizeBaseURL(
     asString(config.baseUrl) ||
       asString(config.baseURL) ||
+      asString(fileConfig.baseUrl) ||
+      asString(fileConfig.baseURL) ||
       env.STATOCYST_BASE_URL ||
       env.STATOCYST_API_BASE ||
       ""
   );
-  const token = trimOrEmpty(asString(config.token) || env.STATOCYST_AGENT_TOKEN || "");
-  const sessionKey = trimOrEmpty(asString(config.sessionKey) || env.STATOCYST_SESSION_KEY || "main");
-  const timeoutMs = normalizeTimeout(asNumber(config.timeoutMs) ?? asNumber(env.STATOCYST_TIMEOUT_MS) ?? defaultTimeoutMs);
-  const pluginId = trimOrEmpty(asString(config.pluginId) || defaultPluginID);
-  const pluginPackage = trimOrEmpty(asString(config.pluginPackage) || defaultPluginPackage);
-  const pluginVersion = trimOrEmpty(asString(config.pluginVersion) || defaultPluginVersion);
+  const token = trimOrEmpty(asString(config.token) || asString(fileConfig.token) || env.STATOCYST_AGENT_TOKEN || "");
+  const sessionKey = trimOrEmpty(asString(config.sessionKey) || asString(fileConfig.sessionKey) || env.STATOCYST_SESSION_KEY || "main");
+  const timeoutMs = normalizeTimeout(
+    asNumber(config.timeoutMs) ?? asNumber(fileConfig.timeoutMs) ?? asNumber(env.STATOCYST_TIMEOUT_MS) ?? defaultTimeoutMs
+  );
+  const pluginId = trimOrEmpty(asString(config.pluginId) || asString(fileConfig.pluginId) || defaultPluginID);
+  const pluginPackage = trimOrEmpty(
+    asString(config.pluginPackage) || asString(fileConfig.pluginPackage) || defaultPluginPackage
+  );
+  const pluginVersion = trimOrEmpty(
+    asString(config.pluginVersion) || asString(fileConfig.pluginVersion) || defaultPluginVersion
+  );
 
   if (!baseUrl) {
     throw new Error("Statocyst plugin configuration requires baseUrl");
@@ -426,6 +438,30 @@ function normalizeBaseURL(raw: string): string {
     return "";
   }
   return trimmed.replace(/\/+$/, "");
+}
+
+function readConfigFile(configPath: string): Record<string, unknown> {
+  if (!configPath) {
+    return {};
+  }
+
+  const absolutePath = resolvePath(configPath);
+  let rawContent = "";
+  try {
+    rawContent = readFileSync(absolutePath, "utf8");
+  } catch (error) {
+    throw new Error(`failed reading Statocyst plugin config file (${absolutePath}): ${String(error)}`);
+  }
+
+  try {
+    const parsed = JSON.parse(rawContent.replace(/^\uFEFF/, ""));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("config file must contain a JSON object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`invalid Statocyst plugin config file (${absolutePath}): ${String(error)}`);
+  }
 }
 
 function normalizeTimeout(raw: number): number {
