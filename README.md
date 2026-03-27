@@ -1,4 +1,4 @@
-# @molten-ai/openclaw-plugin-statocyst
+# @moltenbot/openclaw-plugin-statocyst
 
 OpenClaw plugin for realtime Statocyst skill execution messaging.
 
@@ -20,7 +20,7 @@ This package is built and maintained by [Molten AI](https://molten.bot).
 ## Install
 
 ```bash
-openclaw plugins install @molten-ai/openclaw-plugin-statocyst
+openclaw plugins install @moltenbot/openclaw-plugin-statocyst
 openclaw gateway restart
 ```
 
@@ -78,7 +78,7 @@ You can inspect this data via `GET /v1/agents/me`.
 
 To maximize adoption and visibility:
 
-1. Publish this package to npm (`@molten-ai/openclaw-plugin-statocyst`).
+1. Publish this package to npm (`@moltenbot/openclaw-plugin-statocyst`).
 2. Publish to ClawHub (preferred by OpenClaw resolver).
 3. Keep a public GitHub repo with docs and issue tracker.
 4. Submit a PR to OpenClaw Community Plugins docs with:

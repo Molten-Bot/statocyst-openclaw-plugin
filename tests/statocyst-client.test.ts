@@ -58,7 +58,7 @@ function testConfig() {
     sessionKey: "main",
     timeoutMs: 1000,
     pluginId: "statocyst-openclaw",
-    pluginPackage: "@molten-ai/openclaw-plugin-statocyst",
+    pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
     pluginVersion: "0.1.0-test"
   };
 }

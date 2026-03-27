@@ -252,7 +252,7 @@ async function main() {
     sessionKey: "e2e-main",
     timeoutMs: 15000,
     pluginId: "statocyst-openclaw",
-    pluginPackage: "@molten-ai/openclaw-plugin-statocyst",
+    pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
     pluginVersion: "0.1.0"
   });
 
