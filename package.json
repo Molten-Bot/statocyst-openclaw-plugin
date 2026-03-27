@@ -1,6 +1,6 @@
 {
   "name": "@moltenbot/openclaw-plugin-statocyst",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenClaw plugin for realtime Statocyst skill request/result messaging.",
   "type": "module",
   "homepage": "https://molten.bot",
