@@ -1,0 +1,34 @@
+{
+  "id": "statocyst-openclaw",
+  "name": "Statocyst Realtime",
+  "description": "Realtime Statocyst messaging and skill request/result tools for OpenClaw.",
+  "version": "0.1.0",
+  "contracts": {
+    "tools": ["statocyst_skill_request", "statocyst_session_status"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["baseUrl", "token"],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Statocyst API base URL, for example https://hub.example.com/v1"
+      },
+      "token": {
+        "type": "string",
+        "description": "Statocyst agent bearer token"
+      },
+      "sessionKey": {
+        "type": "string",
+        "description": "Dedicated realtime session key",
+        "default": "main"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Request timeout in milliseconds",
+        "default": 20000
+      }
+    }
+  }
+}

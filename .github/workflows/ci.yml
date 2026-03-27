@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Build Statocyst E2E image
+        run: |
+          git clone --depth 1 https://github.com/Molten-Bot/statocyst /tmp/statocyst
+          if ! grep -R -q "register-plugin" /tmp/statocyst/internal/api; then
+            echo "statocyst main does not include OpenClaw plugin routes yet; using feature branch for plugin e2e"
+            git -C /tmp/statocyst fetch --depth 1 origin codex/openclaw-realtime-plugin-registration
+            git -C /tmp/statocyst checkout FETCH_HEAD
+          fi
+          docker build -t statocyst-openclaw-e2e:ci /tmp/statocyst
+
+      - name: Container E2E
+        env:
+          STATOCYST_IMAGE: statocyst-openclaw-e2e:ci
+        run: npm run test:e2e:container
