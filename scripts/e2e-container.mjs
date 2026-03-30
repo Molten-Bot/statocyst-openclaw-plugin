@@ -129,7 +129,7 @@ async function createAndApproveTrust(alice, bob, orgA, orgB, agentAUUID, agentBU
 
 function runtimeResult(payload, routeName) {
   if (!payload || payload.ok !== true || !payload.result) {
-    throw new Error(`${routeName} did not return runtime success envelope`);
+    throw new Error(`${routeName} did not return runtime success envelope: ${JSON.stringify(payload)}`);
   }
   return payload.result;
 }
@@ -142,17 +142,27 @@ function unwrapResult(payload) {
 }
 
 async function responderLoop(agentBToken, agentAUUID) {
-  const pullPayload = await httpJSON(
-    "GET",
-    "/v1/openclaw/messages/pull?timeout_ms=15000",
-    undefined,
-    runtimeHeaders(agentBToken)
-  );
-  const pullResult = runtimeResult(pullPayload, "openclaw pull");
-  const deliveryID = pullResult?.delivery?.delivery_id;
-  const requestID = pullResult?.openclaw_message?.request_id;
-  assert.ok(deliveryID, "missing delivery_id from responder pull");
-  assert.ok(requestID, "missing request_id from responder pull");
+  const deadlineMs = Date.now() + 45_000;
+  let deliveryID;
+  let requestID;
+  let lastPullPayload = null;
+  while (Date.now() < deadlineMs) {
+    const pullPayload = await httpJSON(
+      "GET",
+      "/v1/openclaw/messages/pull?timeout_ms=15000",
+      undefined,
+      runtimeHeaders(agentBToken)
+    );
+    lastPullPayload = pullPayload;
+    const pullResult = unwrapResult(pullPayload);
+    deliveryID = pullResult?.delivery?.delivery_id;
+    requestID = pullResult?.openclaw_message?.request_id;
+    if (deliveryID && requestID) {
+      break;
+    }
+  }
+  assert.ok(deliveryID, `missing delivery_id from responder pull: ${JSON.stringify(lastPullPayload)}`);
+  assert.ok(requestID, `missing request_id from responder pull: ${JSON.stringify(lastPullPayload)}`);
 
   await httpJSON(
     "POST",
