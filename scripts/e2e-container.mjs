@@ -149,7 +149,7 @@ async function responderLoop(agentBToken, agentAUUID) {
   while (Date.now() < deadlineMs) {
     const pullPayload = await httpJSON(
       "GET",
-      "/v1/openclaw/messages/pull?timeout_ms=15000",
+      "/v1/openclaw/messages/pull?timeout_ms=10000",
       undefined,
       runtimeHeaders(agentBToken)
     );
@@ -260,17 +260,18 @@ async function main() {
     baseUrl: apiBase,
     token: agentA.token,
     sessionKey: "e2e-main",
-    timeoutMs: 15000,
+    timeoutMs: 45000,
     pluginId: "openclaw-plugin-statocyst",
     pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
-    pluginVersion: "0.1.0"
+    pluginVersion: "0.1.4"
   });
 
   const requestPromise = client.requestSkillExecution({
     toAgentUUID: agentB.agentUUID,
     skillName: "echo_skill",
     input: { message: "ping" },
-    requestId: "req-e2e-1"
+    requestId: "req-e2e-1",
+    timeoutMs: 45000
   });
 
   const responderPromise = responderLoop(agentB.token, agentA.agentUUID);
