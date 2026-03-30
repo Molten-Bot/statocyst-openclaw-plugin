@@ -77,15 +77,11 @@ jobs:
           npm publish --access public
 
       - name: Publish to ClawHub
-        if: steps.package.outputs.should_publish_clawhub == 'true'
+        if: steps.package.outputs.should_publish_clawhub == 'true' && secrets.CLAWHUB_TOKEN != ''
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${CLAWHUB_TOKEN:-}" ]; then
-            echo "CLAWHUB_TOKEN secret is not configured."
-            exit 1
-          fi
           npx -y clawhub@latest auth login --token "${CLAWHUB_TOKEN}" --no-browser
           npx -y clawhub@latest --no-input package publish . \
             --name "${{ steps.package.outputs.name }}" \
@@ -95,3 +91,8 @@ jobs:
             --source-commit "${GITHUB_SHA}" \
             --source-ref "${GITHUB_REF_NAME}" \
             --source-path "."
+
+      - name: Skip ClawHub publish when token is unavailable
+        if: steps.package.outputs.should_publish_clawhub == 'true' && secrets.CLAWHUB_TOKEN == ''
+        run: |
+          echo "::warning::CLAWHUB_TOKEN secret is not configured; skipping ClawHub publish."
