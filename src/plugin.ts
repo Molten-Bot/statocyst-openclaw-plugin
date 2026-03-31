@@ -1,20 +1,20 @@
-import { resolveConfig, StatocystClient } from "./statocyst-client.js";
+import { resolveConfig, MoltenHubClient } from "./moltenhub-client.js";
 import type {
   OpenClawPluginAPI,
   OpenClawPlugin,
   OpenClawToolDefinition,
   SkillExecutionRequest,
   SkillExecutionResult,
-  StatocystPluginConfig
+  MoltenHubPluginConfig
 } from "./types.js";
 
-interface StatocystClientContract {
+interface MoltenHubClientContract {
   checkSession: () => Promise<{ status: string; sessionKey: string; transport: string }>;
   requestSkillExecution: (request: SkillExecutionRequest) => Promise<SkillExecutionResult>;
 }
 
 export interface PluginFactoryDeps {
-  createClient?: (config: StatocystPluginConfig) => StatocystClientContract;
+  createClient?: (config: MoltenHubPluginConfig) => MoltenHubClientContract;
 }
 
 const skillRequestInputSchema: Record<string, unknown> = {
@@ -123,11 +123,11 @@ function toToolResult(payload: unknown): Record<string, unknown> {
   };
 }
 
-function skillRequestTool(client: () => StatocystClientContract): OpenClawToolDefinition {
+function skillRequestTool(client: () => MoltenHubClientContract): OpenClawToolDefinition {
   return {
-    name: "statocyst_skill_request",
+    name: "moltenhub_skill_request",
     description:
-      "Send a Statocyst skill_request envelope to a peer and wait for the corresponding skill_result over the realtime websocket bus.",
+      "Send a MoltenHub skill_request envelope to a peer and wait for the corresponding skill_result over the realtime websocket bus.",
     parameters: skillRequestInputSchema,
     execute: async (_callID, params) => {
       const request = parseSkillExecutionRequest(asRecord(params));
@@ -137,10 +137,10 @@ function skillRequestTool(client: () => StatocystClientContract): OpenClawToolDe
   };
 }
 
-function sessionStatusTool(client: () => StatocystClientContract): OpenClawToolDefinition {
+function sessionStatusTool(client: () => MoltenHubClientContract): OpenClawToolDefinition {
   return {
-    name: "statocyst_session_status",
-    description: "Check Statocyst realtime websocket connectivity for this plugin session.",
+    name: "moltenhub_session_status",
+    description: "Check MoltenHub realtime websocket connectivity for this plugin session.",
     parameters: sessionStatusInputSchema,
     execute: async () => {
       const result = await client().checkSession();
@@ -149,7 +149,7 @@ function sessionStatusTool(client: () => StatocystClientContract): OpenClawToolD
   };
 }
 
-function buildClient(api: OpenClawPluginAPI, factory: (config: StatocystPluginConfig) => StatocystClientContract) {
+function buildClient(api: OpenClawPluginAPI, factory: (config: MoltenHubPluginConfig) => MoltenHubClientContract) {
   const config = resolveConfig({
     config: api.pluginConfig ?? {},
     env: asEnvMap(api.env)
@@ -157,13 +157,13 @@ function buildClient(api: OpenClawPluginAPI, factory: (config: StatocystPluginCo
   return factory(config);
 }
 
-export function createStatocystOpenClawPlugin(deps?: PluginFactoryDeps): OpenClawPlugin {
-  const factory = deps?.createClient ?? ((config: StatocystPluginConfig) => new StatocystClient(config));
+export function createMoltenHubOpenClawPlugin(deps?: PluginFactoryDeps): OpenClawPlugin {
+  const factory = deps?.createClient ?? ((config: MoltenHubPluginConfig) => new MoltenHubClient(config));
 
   return {
-    id: "openclaw-plugin-statocyst",
-    name: "Statocyst Realtime",
-    description: "Molten AI maintained plugin for realtime skill request/result exchange via Statocyst.",
+    id: "openclaw-plugin-moltenhub",
+    name: "MoltenHub Realtime",
+    description: "Molten AI maintained plugin for realtime skill request/result exchange via MoltenHub.",
     version: "0.1.4",
     register: (api: OpenClawPluginAPI) => {
       const client = buildClient(api, factory);

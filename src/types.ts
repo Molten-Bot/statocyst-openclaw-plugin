@@ -28,7 +28,7 @@ export interface ResolveConfigInput {
   env?: Record<string, string | undefined>;
 }
 
-export interface StatocystPluginConfig {
+export interface MoltenHubPluginConfig {
   baseUrl: string;
   token: string;
   sessionKey: string;

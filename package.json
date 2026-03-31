@@ -1,16 +1,16 @@
 {
-  "name": "@moltenbot/openclaw-plugin-statocyst",
+  "name": "@moltenbot/openclaw-plugin-moltenhub",
   "version": "0.1.4",
-  "description": "OpenClaw plugin for realtime Statocyst skill request/result messaging.",
+  "description": "OpenClaw plugin for realtime MoltenHub skill request/result messaging.",
   "type": "module",
   "homepage": "https://molten.bot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Molten-Bot/statocyst",
-    "directory": "statocyst-openclaw-plugin"
+    "url": "https://github.com/Molten-Bot/moltenhub",
+    "directory": "moltenhub-openclaw-plugin"
   },
   "bugs": {
-    "url": "https://github.com/Molten-Bot/statocyst/issues"
+    "url": "https://github.com/Molten-Bot/moltenhub/issues"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,8 +19,8 @@
       "./dist/index.js"
     ],
     "install": {
-      "npmSpec": "@moltenbot/openclaw-plugin-statocyst",
-      "defaultChoice": "npm:@moltenbot/openclaw-plugin-statocyst"
+      "npmSpec": "@moltenbot/openclaw-plugin-moltenhub",
+      "defaultChoice": "npm:@moltenbot/openclaw-plugin-moltenhub"
     }
   },
   "exports": {
@@ -47,7 +47,7 @@
   },
   "keywords": [
     "openclaw",
-    "statocyst",
+    "moltenhub",
     "plugin",
     "realtime",
     "molten-ai"

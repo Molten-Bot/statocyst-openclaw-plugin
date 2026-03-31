@@ -7,7 +7,7 @@ import type {
   ResolveConfigInput,
   SkillExecutionRequest,
   SkillExecutionResult,
-  StatocystPluginConfig
+  MoltenHubPluginConfig
 } from "./types.js";
 
 export interface WebSocketLike {
@@ -18,7 +18,7 @@ export interface WebSocketLike {
 
 export type WebSocketFactory = (url: string, headers: Record<string, string>) => WebSocketLike;
 
-export interface StatocystClientDeps {
+export interface MoltenHubClientDeps {
   fetchImpl: typeof fetch;
   wsFactory: WebSocketFactory;
   now: () => Date;
@@ -26,12 +26,12 @@ export interface StatocystClientDeps {
 }
 
 const defaultTimeoutMs = 20_000;
-const defaultPluginID = "openclaw-plugin-statocyst";
-const defaultPluginPackage = "@moltenbot/openclaw-plugin-statocyst";
+const defaultPluginID = "openclaw-plugin-moltenhub";
+const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
 const defaultPluginVersion = "0.1.4";
-const defaultStatocystBaseURL = "https://na.hive.molten.bot/v1";
+const defaultMoltenHubBaseURL = "https://na.hub.molten.bot/v1";
 
-const defaultDeps: StatocystClientDeps = {
+const defaultDeps: MoltenHubClientDeps = {
   fetchImpl: fetch,
   wsFactory: (url, headers) => new WebSocket(url, { headers }),
   now: () => new Date(),
@@ -115,10 +115,10 @@ class WebSocketSession {
   }
 }
 
-export class StatocystClient {
-  private readonly deps: StatocystClientDeps;
+export class MoltenHubClient {
+  private readonly deps: MoltenHubClientDeps;
 
-  constructor(private readonly config: StatocystPluginConfig, deps?: Partial<StatocystClientDeps>) {
+  constructor(private readonly config: MoltenHubPluginConfig, deps?: Partial<MoltenHubClientDeps>) {
     this.deps = {
       ...defaultDeps,
       ...deps
@@ -144,7 +144,7 @@ export class StatocystClient {
 
     if (!response.ok) {
       const body = await safeReadText(response);
-      throw new Error(`statocyst plugin registration failed (${response.status}): ${body}`);
+      throw new Error(`moltenhub plugin registration failed (${response.status}): ${body}`);
     }
   }
 
@@ -249,7 +249,7 @@ export class StatocystClient {
           if (!ok) {
             const code = trimOrEmpty(readObject(payload.error).code) || "unknown_error";
             const message = trimOrEmpty(readObject(payload.error).message) || "unknown error";
-            throw new Error(`statocyst websocket response error (${code}): ${message}`);
+            throw new Error(`moltenhub websocket response error (${code}): ${message}`);
           }
         }
       }
@@ -309,7 +309,7 @@ export class StatocystClient {
       if (!Boolean(payload.ok)) {
         const code = trimOrEmpty(readObject(payload.error).code) || "unknown_error";
         const message = trimOrEmpty(readObject(payload.error).message) || "unknown error";
-        throw new Error(`statocyst websocket response error (${code}): ${message}`);
+        throw new Error(`moltenhub websocket response error (${code}): ${message}`);
       }
       return;
     }
@@ -337,10 +337,10 @@ export class StatocystClient {
   }
 }
 
-export function resolveConfig(context: ResolveConfigInput): StatocystPluginConfig {
+export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfig {
   const config = context.config ?? {};
   const env = context.env ?? {};
-  const configFilePath = trimOrEmpty(asString(config.configFile) || env.STATOCYST_CONFIG_FILE || "");
+  const configFilePath = trimOrEmpty(asString(config.configFile) || env.MOLTENHUB_CONFIG_FILE || "");
   const fileConfig = readConfigFile(configFilePath);
 
   const baseUrl = normalizeBaseURL(
@@ -348,14 +348,14 @@ export function resolveConfig(context: ResolveConfigInput): StatocystPluginConfi
       asString(config.baseURL) ||
       asString(fileConfig.baseUrl) ||
       asString(fileConfig.baseURL) ||
-      env.STATOCYST_BASE_URL ||
-      env.STATOCYST_API_BASE ||
-      defaultStatocystBaseURL
+      env.MOLTENHUB_BASE_URL ||
+      env.MOLTENHUB_API_BASE ||
+      defaultMoltenHubBaseURL
   );
-  const token = trimOrEmpty(asString(config.token) || asString(fileConfig.token) || env.STATOCYST_AGENT_TOKEN || "");
-  const sessionKey = trimOrEmpty(asString(config.sessionKey) || asString(fileConfig.sessionKey) || env.STATOCYST_SESSION_KEY || "main");
+  const token = trimOrEmpty(asString(config.token) || asString(fileConfig.token) || env.MOLTENHUB_AGENT_TOKEN || "");
+  const sessionKey = trimOrEmpty(asString(config.sessionKey) || asString(fileConfig.sessionKey) || env.MOLTENHUB_SESSION_KEY || "main");
   const timeoutMs = normalizeTimeout(
-    asNumber(config.timeoutMs) ?? asNumber(fileConfig.timeoutMs) ?? asNumber(env.STATOCYST_TIMEOUT_MS) ?? defaultTimeoutMs
+    asNumber(config.timeoutMs) ?? asNumber(fileConfig.timeoutMs) ?? asNumber(env.MOLTENHUB_TIMEOUT_MS) ?? defaultTimeoutMs
   );
   const pluginId = trimOrEmpty(asString(config.pluginId) || asString(fileConfig.pluginId) || defaultPluginID);
   const pluginPackage = trimOrEmpty(
@@ -366,7 +366,7 @@ export function resolveConfig(context: ResolveConfigInput): StatocystPluginConfi
   );
 
   if (!token) {
-    throw new Error("Statocyst plugin configuration requires token");
+    throw new Error("MoltenHub plugin configuration requires token");
   }
 
   return {
@@ -433,7 +433,7 @@ function normalizeWSRawData(raw: unknown): string {
 function normalizeBaseURL(raw: string): string {
   const trimmed = trimOrEmpty(raw);
   if (!trimmed) {
-    return defaultStatocystBaseURL;
+    return defaultMoltenHubBaseURL;
   }
   return trimmed.replace(/\/+$/, "");
 }
@@ -448,7 +448,7 @@ function readConfigFile(configPath: string): Record<string, unknown> {
   try {
     rawContent = readFileSync(absolutePath, "utf8");
   } catch (error) {
-    throw new Error(`failed reading Statocyst plugin config file (${absolutePath}): ${String(error)}`);
+    throw new Error(`failed reading MoltenHub plugin config file (${absolutePath}): ${String(error)}`);
   }
 
   try {
@@ -458,7 +458,7 @@ function readConfigFile(configPath: string): Record<string, unknown> {
     }
     return parsed as Record<string, unknown>;
   } catch (error) {
-    throw new Error(`invalid Statocyst plugin config file (${absolutePath}): ${String(error)}`);
+    throw new Error(`invalid MoltenHub plugin config file (${absolutePath}): ${String(error)}`);
   }
 }
 

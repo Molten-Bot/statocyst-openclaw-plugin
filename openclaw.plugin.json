@@ -1,10 +1,10 @@
 {
-  "id": "openclaw-plugin-statocyst",
-  "name": "Statocyst Realtime",
-  "description": "Realtime Statocyst messaging and skill request/result tools for OpenClaw.",
+  "id": "openclaw-plugin-moltenhub",
+  "name": "MoltenHub Realtime",
+  "description": "Realtime MoltenHub messaging and skill request/result tools for OpenClaw.",
   "version": "0.1.4",
   "contracts": {
-    "tools": ["statocyst_skill_request", "statocyst_session_status"]
+    "tools": ["moltenhub_skill_request", "moltenhub_session_status"]
   },
   "configSchema": {
     "type": "object",
@@ -24,12 +24,12 @@
       },
       "baseUrl": {
         "type": "string",
-        "description": "Statocyst API base URL, for example https://na.hive.molten.bot/v1",
-        "default": "https://na.hive.molten.bot/v1"
+        "description": "MoltenHub API base URL, for example https://na.hub.molten.bot/v1",
+        "default": "https://na.hub.molten.bot/v1"
       },
       "token": {
         "type": "string",
-        "description": "Statocyst agent bearer token (required unless configFile is provided)"
+        "description": "MoltenHub agent bearer token (required unless configFile is provided)"
       },
       "sessionKey": {
         "type": "string",

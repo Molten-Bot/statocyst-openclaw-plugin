@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { StatocystClient } from "../dist/index.js";
+import { MoltenHubClient } from "../dist/index.js";
 
-const statocystImage = process.env.STATOCYST_IMAGE || "moltenbot/statocyst:latest";
-const statocystPort = Number.parseInt(process.env.STATOCYST_PORT || "18082", 10);
-const containerName = `statocyst-openclaw-plugin-e2e-${statocystPort}`;
-const baseURL = `http://127.0.0.1:${statocystPort}`;
+const moltenhubImage = process.env.MOLTENHUB_IMAGE || "moltenbot/moltenhub:latest";
+const moltenhubPort = Number.parseInt(process.env.MOLTENHUB_PORT || "18082", 10);
+const containerName = `moltenhub-openclaw-plugin-e2e-${moltenhubPort}`;
+const baseURL = `http://127.0.0.1:${moltenhubPort}`;
 const apiBase = `${baseURL}/v1`;
 
 function run(command, args, options = {}) {
@@ -205,7 +205,7 @@ async function waitForHealth() {
     }
     await delay(1000);
   }
-  throw new Error(`statocyst container did not become healthy at ${baseURL}/health`);
+  throw new Error(`moltenhub container did not become healthy at ${baseURL}/health`);
 }
 
 async function ensureOpenClawRealtimeRoutes() {
@@ -214,7 +214,7 @@ async function ensureOpenClawRealtimeRoutes() {
     return;
   }
   throw new Error(
-    `statocyst image "${statocystImage}" does not expose /v1/openclaw/messages/ws; set STATOCYST_IMAGE to a build containing realtime OpenClaw routes`
+    `moltenhub image "${moltenhubImage}" does not expose /v1/openclaw/messages/ws; set MOLTENHUB_IMAGE to a build containing realtime OpenClaw routes`
   );
 }
 
@@ -231,12 +231,12 @@ async function main() {
     "--name",
     containerName,
     "-p",
-    `127.0.0.1:${statocystPort}:8080`,
+    `127.0.0.1:${moltenhubPort}:8080`,
     "-e",
     "HUMAN_AUTH_PROVIDER=dev",
     "-e",
-    `STATOCYST_CANONICAL_BASE_URL=${baseURL}`,
-    statocystImage
+    `MOLTENHUB_CANONICAL_BASE_URL=${baseURL}`,
+    moltenhubImage
   ]);
 
   await waitForHealth();
@@ -256,13 +256,13 @@ async function main() {
 
   await createAndApproveTrust(alice, bob, orgA, orgB, agentA.agentUUID, agentB.agentUUID);
 
-  const client = new StatocystClient({
+  const client = new MoltenHubClient({
     baseUrl: apiBase,
     token: agentA.token,
     sessionKey: "e2e-main",
     timeoutMs: 45000,
-    pluginId: "openclaw-plugin-statocyst",
-    pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
+    pluginId: "openclaw-plugin-moltenhub",
+    pluginPackage: "@moltenbot/openclaw-plugin-moltenhub",
     pluginVersion: "0.1.4"
   });
 

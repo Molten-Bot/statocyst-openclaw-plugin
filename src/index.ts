@@ -1,7 +1,7 @@
-import { createStatocystOpenClawPlugin } from "./plugin.js";
+import { createMoltenHubOpenClawPlugin } from "./plugin.js";
 
-export { createStatocystOpenClawPlugin };
-export { resolveConfig, StatocystClient } from "./statocyst-client.js";
+export { createMoltenHubOpenClawPlugin };
+export { resolveConfig, MoltenHubClient } from "./moltenhub-client.js";
 export type {
   OpenClawPlugin,
   OpenClawPluginAPI,
@@ -10,9 +10,9 @@ export type {
   OpenClawToolDefinition,
   SkillExecutionRequest,
   SkillExecutionResult,
-  StatocystPluginConfig
+  MoltenHubPluginConfig
 } from "./types.js";
 
-const plugin = createStatocystOpenClawPlugin();
+const plugin = createMoltenHubOpenClawPlugin();
 
 export default plugin;

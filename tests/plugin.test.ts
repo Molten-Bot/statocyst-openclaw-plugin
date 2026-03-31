@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createStatocystOpenClawPlugin } from "../src/plugin.js";
+import { createMoltenHubOpenClawPlugin } from "../src/plugin.js";
 import type { OpenClawToolDefinition } from "../src/types.js";
 
 function setupPluginWithMockClient() {
@@ -19,7 +19,7 @@ function setupPluginWithMockClient() {
     transport: "websocket"
   }));
 
-  const plugin = createStatocystOpenClawPlugin({
+  const plugin = createMoltenHubOpenClawPlugin({
     createClient: () => ({
       requestSkillExecution,
       checkSession
@@ -43,14 +43,14 @@ function setupPluginWithMockClient() {
   };
 }
 
-describe("createStatocystOpenClawPlugin", () => {
+describe("createMoltenHubOpenClawPlugin", () => {
   it("registers skill and session tools", () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
 
     expect(ctx.tools.map((tool) => tool.name)).toEqual([
-      "statocyst_skill_request",
-      "statocyst_session_status"
+      "moltenhub_skill_request",
+      "moltenhub_session_status"
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("createStatocystOpenClawPlugin", () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
 
-    const skillTool = ctx.tools.find((tool) => tool.name === "statocyst_skill_request");
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
     expect(skillTool).toBeDefined();
 
     const result = await skillTool!.execute("call-1", {
@@ -104,7 +104,7 @@ describe("createStatocystOpenClawPlugin", () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
 
-    const skillTool = ctx.tools.find((tool) => tool.name === "statocyst_skill_request");
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
     expect(skillTool).toBeDefined();
 
     await skillTool!.execute("call-2", {
@@ -128,7 +128,7 @@ describe("createStatocystOpenClawPlugin", () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
 
-    const skillTool = ctx.tools.find((tool) => tool.name === "statocyst_skill_request");
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
     expect(skillTool).toBeDefined();
 
     await skillTool!.execute("call-3", {
@@ -146,9 +146,9 @@ describe("createStatocystOpenClawPlugin", () => {
     });
   });
 
-  it("uses default StatocystClient factory when none is provided", () => {
+  it("uses default MoltenHubClient factory when none is provided", () => {
     const tools: OpenClawToolDefinition[] = [];
-    const plugin = createStatocystOpenClawPlugin();
+    const plugin = createMoltenHubOpenClawPlugin();
     plugin.register({
       pluginConfig: {
         baseUrl: "http://localhost:8080/v1",
@@ -164,7 +164,7 @@ describe("createStatocystOpenClawPlugin", () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
 
-    const statusTool = ctx.tools.find((tool) => tool.name === "statocyst_session_status");
+    const statusTool = ctx.tools.find((tool) => tool.name === "moltenhub_session_status");
     expect(statusTool).toBeDefined();
 
     const status = await statusTool!.execute("call-4", {});
@@ -186,13 +186,13 @@ describe("createStatocystOpenClawPlugin", () => {
 
   it("uses api env fallback for required configuration", () => {
     const tools: OpenClawToolDefinition[] = [];
-    const plugin = createStatocystOpenClawPlugin();
+    const plugin = createMoltenHubOpenClawPlugin();
     plugin.register({
       pluginConfig: {
         baseUrl: "http://localhost:8080/v1"
       },
       env: {
-        STATOCYST_AGENT_TOKEN: "token-from-env"
+        MOLTENHUB_AGENT_TOKEN: "token-from-env"
       },
       registerTool: (tool) => tools.push(tool)
     });
@@ -201,11 +201,11 @@ describe("createStatocystOpenClawPlugin", () => {
 
   it("supports env-only configuration when plugin config is omitted", () => {
     const tools: OpenClawToolDefinition[] = [];
-    const plugin = createStatocystOpenClawPlugin();
+    const plugin = createMoltenHubOpenClawPlugin();
     plugin.register({
       env: {
-        STATOCYST_BASE_URL: "http://localhost:8080/v1",
-        STATOCYST_AGENT_TOKEN: "token-only-env"
+        MOLTENHUB_BASE_URL: "http://localhost:8080/v1",
+        MOLTENHUB_AGENT_TOKEN: "token-only-env"
       },
       registerTool: (tool) => tools.push(tool)
     });
@@ -215,7 +215,7 @@ describe("createStatocystOpenClawPlugin", () => {
   it("treats non-object tool params as empty input", async () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);
-    const skillTool = ctx.tools.find((tool) => tool.name === "statocyst_skill_request");
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
     expect(skillTool).toBeDefined();
 
     await skillTool!.execute("call-5", null as unknown as Record<string, unknown>);
@@ -242,7 +242,7 @@ describe("createStatocystOpenClawPlugin", () => {
       messageId: string;
       deliveryId: string;
     });
-    const plugin = createStatocystOpenClawPlugin({
+    const plugin = createMoltenHubOpenClawPlugin({
       createClient: () => ({
         requestSkillExecution,
         checkSession: vi.fn(async () => ({ status: "ok", sessionKey: "main", transport: "websocket" }))
@@ -257,7 +257,7 @@ describe("createStatocystOpenClawPlugin", () => {
       registerTool: (tool) => tools.push(tool)
     });
 
-    const skillTool = tools.find((tool) => tool.name === "statocyst_skill_request");
+    const skillTool = tools.find((tool) => tool.name === "moltenhub_skill_request");
     expect(skillTool).toBeDefined();
 
     const result = await skillTool!.execute("call-6", {

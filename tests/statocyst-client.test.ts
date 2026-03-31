@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveConfig, StatocystClient, type WebSocketLike } from "../src/statocyst-client.js";
+import { resolveConfig, MoltenHubClient, type WebSocketLike } from "../src/moltenhub-client.js";
 
 type OnSend = (payload: Record<string, unknown>, socket: FakeWebSocket) => void;
 
@@ -60,14 +60,14 @@ function testConfig() {
     token: "agent-token",
     sessionKey: "main",
     timeoutMs: 1000,
-    pluginId: "openclaw-plugin-statocyst",
-    pluginPackage: "@moltenbot/openclaw-plugin-statocyst",
+    pluginId: "openclaw-plugin-moltenhub",
+    pluginPackage: "@moltenbot/openclaw-plugin-moltenhub",
     pluginVersion: "0.1.0-test"
   };
 }
 
 function writeTempJSONFile(content: unknown): string {
-  const dir = mkdtempSync(join(tmpdir(), "statocyst-openclaw-plugin-"));
+  const dir = mkdtempSync(join(tmpdir(), "moltenhub-openclaw-plugin-"));
   const filePath = join(dir, "config.json");
   writeFileSync(filePath, JSON.stringify(content), "utf8");
   return filePath;
@@ -97,7 +97,7 @@ function openAndReady(
   });
 }
 
-describe("StatocystClient", () => {
+describe("MoltenHubClient", () => {
   it("registers plugin and completes skill request over websocket", async () => {
     let receivedURL = "";
     let receivedAuth = "";
@@ -146,7 +146,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-1",
       wsFactory: (url, headers) => {
@@ -231,7 +231,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-2",
       wsFactory: () => {
@@ -263,7 +263,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-3",
       wsFactory: () => {
@@ -287,7 +287,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-close-wait",
       wsFactory: () => {
@@ -318,7 +318,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-4",
       wsFactory: () => {
@@ -342,7 +342,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-error-wait",
       wsFactory: () => {
@@ -396,7 +396,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       wsFactory: () => {
         openAndReady(socket);
@@ -425,7 +425,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 60
@@ -462,7 +462,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 60
@@ -499,7 +499,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 60
@@ -525,7 +525,7 @@ describe("StatocystClient", () => {
   it("checkSession verifies websocket handshake", async () => {
     const socket = new FakeWebSocket();
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       wsFactory: () => {
         openAndReady(socket);
@@ -544,7 +544,7 @@ describe("StatocystClient", () => {
   it("checkSession handles session_ready emitted immediately after open", async () => {
     const socket = new FakeWebSocket();
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       wsFactory: () => {
         queueMicrotask(() => {
@@ -566,7 +566,7 @@ describe("StatocystClient", () => {
   it("checkSession rejects unexpected websocket handshake payload", async () => {
     const socket = new FakeWebSocket();
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       wsFactory: () => {
         openAndReady(socket, { type: "not_ready" });
@@ -580,7 +580,7 @@ describe("StatocystClient", () => {
   it("checkSession rejects websocket open errors", async () => {
     const socket = new FakeWebSocket();
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       wsFactory: () => {
         queueMicrotask(() => {
@@ -596,7 +596,7 @@ describe("StatocystClient", () => {
   it("checkSession times out waiting for websocket open", async () => {
     const socket = new FakeWebSocket();
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 20
@@ -611,7 +611,7 @@ describe("StatocystClient", () => {
   });
 
   it("uses default websocket factory when one is not provided", async () => {
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         baseUrl: "http://127.0.0.1:1/v1",
@@ -632,7 +632,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 50
@@ -670,7 +670,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 1
@@ -753,7 +753,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-wait-for-response",
       wsFactory: () => {
@@ -784,7 +784,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-error-response",
       wsFactory: () => {
@@ -824,7 +824,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-runtime-response-error",
       wsFactory: () => {
@@ -861,7 +861,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-runtime-response-defaults",
       wsFactory: () => {
@@ -902,7 +902,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-no-delivery-id",
       wsFactory: () => {
@@ -919,7 +919,7 @@ describe("StatocystClient", () => {
   });
 
   it("fails when plugin registration response is not ok", async () => {
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: vi.fn(async () => new Response("forbidden", { status: 403 }))
     });
 
@@ -927,7 +927,7 @@ describe("StatocystClient", () => {
   });
 
   it("fails with empty registration body when response text throws", async () => {
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: vi.fn(async () => {
         return {
           ok: false,
@@ -943,7 +943,7 @@ describe("StatocystClient", () => {
   });
 
   it("validates required request fields", async () => {
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy()
     });
 
@@ -963,7 +963,7 @@ describe("StatocystClient", () => {
       throw new Error("send failed");
     });
 
-    const client = new StatocystClient(testConfig(), {
+    const client = new MoltenHubClient(testConfig(), {
       fetchImpl: fetchOKSpy(),
       randomID: () => "req-send-error",
       wsFactory: () => {
@@ -1002,7 +1002,7 @@ describe("StatocystClient", () => {
       }
     });
 
-    const client = new StatocystClient(
+    const client = new MoltenHubClient(
       {
         ...testConfig(),
         timeoutMs: 1
@@ -1053,7 +1053,7 @@ describe("StatocystClient", () => {
 
     const resolvedFromEnvConfigFile = resolveConfig({
       env: {
-        STATOCYST_CONFIG_FILE: filePath
+        MOLTENHUB_CONFIG_FILE: filePath
       }
     });
     expect(resolvedFromEnvConfigFile.token).toBe("token-file");
@@ -1092,10 +1092,10 @@ describe("StatocystClient", () => {
 
     const resolvedFromEnv = resolveConfig({
       env: {
-        STATOCYST_BASE_URL: "https://hub.example.com/v1",
-        STATOCYST_AGENT_TOKEN: "token-b",
-        STATOCYST_SESSION_KEY: "session-b",
-        STATOCYST_TIMEOUT_MS: "72000"
+        MOLTENHUB_BASE_URL: "https://hub.example.com/v1",
+        MOLTENHUB_AGENT_TOKEN: "token-b",
+        MOLTENHUB_SESSION_KEY: "session-b",
+        MOLTENHUB_TIMEOUT_MS: "72000"
       }
     });
 
@@ -1104,32 +1104,32 @@ describe("StatocystClient", () => {
 
     const resolvedInvalidTimeout = resolveConfig({
       env: {
-        STATOCYST_BASE_URL: "https://hub.example.com/v1",
-        STATOCYST_AGENT_TOKEN: "token-c",
-        STATOCYST_TIMEOUT_MS: "not-a-number"
+        MOLTENHUB_BASE_URL: "https://hub.example.com/v1",
+        MOLTENHUB_AGENT_TOKEN: "token-c",
+        MOLTENHUB_TIMEOUT_MS: "not-a-number"
       }
     });
     expect(resolvedInvalidTimeout.timeoutMs).toBe(20000);
 
     const resolvedZeroTimeout = resolveConfig({
       env: {
-        STATOCYST_BASE_URL: "https://hub.example.com/v1",
-        STATOCYST_AGENT_TOKEN: "token-d",
-        STATOCYST_TIMEOUT_MS: "0"
+        MOLTENHUB_BASE_URL: "https://hub.example.com/v1",
+        MOLTENHUB_AGENT_TOKEN: "token-d",
+        MOLTENHUB_TIMEOUT_MS: "0"
       }
     });
     expect(resolvedZeroTimeout.timeoutMs).toBe(20000);
   });
 
   it("resolveConfig fails for unreadable or invalid config files", () => {
-    const missingPath = join(tmpdir(), "statocyst-openclaw-plugin-missing", "config.json");
+    const missingPath = join(tmpdir(), "moltenhub-openclaw-plugin-missing", "config.json");
     expect(() =>
       resolveConfig({
         config: {
           configFile: missingPath
         }
       })
-    ).toThrow("failed reading Statocyst plugin config file");
+    ).toThrow("failed reading MoltenHub plugin config file");
 
     const invalidJSONPath = writeTempJSONFile({});
     writeFileSync(invalidJSONPath, "{", "utf8");
@@ -1139,7 +1139,7 @@ describe("StatocystClient", () => {
           configFile: invalidJSONPath
         }
       })
-    ).toThrow("invalid Statocyst plugin config file");
+    ).toThrow("invalid MoltenHub plugin config file");
 
     const invalidShapePath = writeTempJSONFile(["bad-shape"]);
     expect(() =>
@@ -1152,9 +1152,9 @@ describe("StatocystClient", () => {
   });
 
   it("resolveConfig defaults baseUrl and enforces token", () => {
-    expect(resolveConfig({ config: { token: "token-a" } }).baseUrl).toBe("https://na.hive.molten.bot/v1");
+    expect(resolveConfig({ config: { token: "token-a" } }).baseUrl).toBe("https://na.hub.molten.bot/v1");
     expect(resolveConfig({ config: { baseUrl: "   ", token: "token-b" } }).baseUrl).toBe(
-      "https://na.hive.molten.bot/v1"
+      "https://na.hub.molten.bot/v1"
     );
     expect(() => resolveConfig({ config: { baseUrl: "https://hub.example.com/v1" } })).toThrow("requires token");
   });

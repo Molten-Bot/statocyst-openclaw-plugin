@@ -33,17 +33,17 @@ jobs:
       - name: Unit tests with coverage
         run: npm run test:coverage
 
-      - name: Build Statocyst E2E image
+      - name: Build MoltenHub E2E image
         run: |
-          git clone --depth 1 https://github.com/Molten-Bot/statocyst /tmp/statocyst
-          if ! grep -R -q "register-plugin" /tmp/statocyst/internal/api; then
-            echo "statocyst main does not include OpenClaw plugin routes yet; using feature branch for plugin e2e"
-            git -C /tmp/statocyst fetch --depth 1 origin codex/openclaw-realtime-plugin-registration
-            git -C /tmp/statocyst checkout FETCH_HEAD
+          git clone --depth 1 https://github.com/Molten-Bot/moltenhub /tmp/moltenhub
+          if ! grep -R -q "register-plugin" /tmp/moltenhub/internal/api; then
+            echo "moltenhub main does not include OpenClaw plugin routes yet; using feature branch for plugin e2e"
+            git -C /tmp/moltenhub fetch --depth 1 origin codex/openclaw-realtime-plugin-registration
+            git -C /tmp/moltenhub checkout FETCH_HEAD
           fi
-          docker build -t statocyst-openclaw-e2e:ci /tmp/statocyst
+          docker build -t moltenhub-openclaw-e2e:ci /tmp/moltenhub
 
       - name: Container E2E
         env:
-          STATOCYST_IMAGE: statocyst-openclaw-e2e:ci
+          MOLTENHUB_IMAGE: moltenhub-openclaw-e2e:ci
         run: npm run test:e2e:container
