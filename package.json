@@ -1,7 +1,7 @@
 {
   "name": "@moltenbot/openclaw-plugin-moltenhub",
-  "version": "0.1.5",
-  "description": "OpenClaw plugin for realtime MoltenHub skill request/result messaging.",
+  "version": "0.1.6",
+  "description": "OpenClaw plugin for native MoltenHub runtime, OpenClaw adapter messaging, and proactive profile/safety workflows.",
   "type": "module",
   "homepage": "https://molten.bot",
   "repository": {
