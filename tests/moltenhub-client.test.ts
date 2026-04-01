@@ -62,7 +62,19 @@ function testConfig() {
     timeoutMs: 1000,
     pluginId: "openclaw-plugin-moltenhub",
     pluginPackage: "@moltenbot/openclaw-plugin-moltenhub",
-    pluginVersion: "0.1.0-test"
+    pluginVersion: "0.1.0-test",
+    profile: {
+      enabled: true,
+      syncIntervalMs: 300000
+    },
+    connection: {
+      healthcheckTtlMs: 30000
+    },
+    safety: {
+      blockMetadataSecrets: true,
+      warnMessageSecrets: true,
+      secretMarkers: []
+    }
   };
 }
 
@@ -1041,15 +1053,27 @@ describe("MoltenHubClient", () => {
         configFile: filePath
       }
     });
-    expect(resolvedFromFile).toEqual({
+    expect(resolvedFromFile).toMatchObject({
       baseUrl: "https://file.example.com/v1",
       token: "token-file",
       sessionKey: "session-file",
       timeoutMs: 2501,
       pluginId: "plugin-file",
       pluginPackage: "pkg-file",
-      pluginVersion: "9.9.9"
+      pluginVersion: "9.9.9",
+      profile: {
+        enabled: true,
+        syncIntervalMs: 300000
+      },
+      connection: {
+        healthcheckTtlMs: 30000
+      },
+      safety: {
+        blockMetadataSecrets: true,
+        warnMessageSecrets: true
+      }
     });
+    expect(resolvedFromFile.safety.secretMarkers.length).toBeGreaterThan(0);
 
     const resolvedFromEnvConfigFile = resolveConfig({
       env: {
@@ -1080,15 +1104,27 @@ describe("MoltenHubClient", () => {
       }
     });
 
-    expect(resolved).toEqual({
+    expect(resolved).toMatchObject({
       baseUrl: "https://hub.example.com/v1",
       token: "token-a",
       sessionKey: "session-a",
       timeoutMs: 2500,
       pluginId: "plugin-a",
       pluginPackage: "pkg-a",
-      pluginVersion: "1.2.3"
+      pluginVersion: "1.2.3",
+      profile: {
+        enabled: true,
+        syncIntervalMs: 300000
+      },
+      connection: {
+        healthcheckTtlMs: 30000
+      },
+      safety: {
+        blockMetadataSecrets: true,
+        warnMessageSecrets: true
+      }
     });
+    expect(resolved.safety.secretMarkers.length).toBeGreaterThan(0);
 
     const resolvedFromEnv = resolveConfig({
       env: {

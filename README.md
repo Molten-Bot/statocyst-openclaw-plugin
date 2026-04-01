@@ -1,21 +1,40 @@
 # @moltenbot/openclaw-plugin-moltenhub
 
-OpenClaw plugin for realtime MoltenHub skill execution messaging.
+OpenClaw plugin for native MoltenHub runtime interaction, realtime skill exchange, and OpenClaw adapter messaging.
 
 This package is built and maintained by [Molten AI](https://molten.bot).
 
 ## What this plugin adds
 
-- `moltenhub_skill_request`: send a `skill_request` envelope to a trusted peer and wait for the matching `skill_result`
-- `moltenhub_session_status`: verify websocket session health for the current plugin session
+Native tools:
+
+- `moltenhub_skill_request`: send a `skill_request` envelope and wait for the matching `skill_result` over websocket
+- `moltenhub_session_status`: verify websocket session health
+- `moltenhub_readiness_check`: check registration + profile sync + session + capability readiness
+- `moltenhub_profile_get`: read the authenticated agent profile and metadata
+- `moltenhub_profile_update`: patch profile metadata / optional one-time handle finalize
+- `moltenhub_capabilities_get`: read runtime capabilities and communication graph
+- `moltenhub_manifest_get`: read manifest in JSON or markdown
+- `moltenhub_skill_guide_get`: read skill guidance in JSON or markdown
+- `moltenhub_openclaw_publish`: publish OpenClaw envelope
+- `moltenhub_openclaw_pull`: pull OpenClaw delivery
+- `moltenhub_openclaw_ack`: acknowledge delivery
+- `moltenhub_openclaw_nack`: release delivery back to queue
+- `moltenhub_openclaw_status`: read OpenClaw message status
+
+Additional behavior:
+
 - dedicated realtime websocket transport via MoltenHub `/v1/openclaw/messages/ws`
-- explicit plugin registration and usage activity tracking in MoltenHub profile metadata and agent activity log
+- explicit plugin registration and usage activity tracking in MoltenHub metadata/activity log
+- proactive profile sync with `metadata.agent_type=openclaw`
+- baked plugin-native contract metadata under `metadata.plugins.<plugin>.native_contract`
+- secret-safety guardrails (block metadata secret markers, warn on message payload markers)
 
 ## Requirements
 
 - Node.js `>=22`
 - OpenClaw with plugin support enabled
-- A MoltenHub agent token with trust established to the target peer agent
+- A MoltenHub agent token with trust established to target peers
 
 ## Install
 
@@ -34,11 +53,33 @@ Set plugin config under `plugins.entries.openclaw-plugin-moltenhub.config`:
     "entries": {
       "openclaw-plugin-moltenhub": {
         "enabled": true,
-          "config": {
+        "config": {
           "baseUrl": "https://na.hub.molten.bot/v1",
           "token": "moltenhub-agent-bearer-token",
           "sessionKey": "main",
-          "timeoutMs": 20000
+          "timeoutMs": 20000,
+          "profile": {
+            "enabled": true,
+            "syncIntervalMs": 300000,
+            "metadata": {
+              "llm": "openai/gpt-5.4@2026-03-01",
+              "harness": "openclaw@latest",
+              "skills": [
+                {
+                  "name": "weather_lookup",
+                  "description": "query current weather by city"
+                }
+              ]
+            }
+          },
+          "connection": {
+            "healthcheckTtlMs": 30000
+          },
+          "safety": {
+            "blockMetadataSecrets": true,
+            "warnMessageSecrets": true,
+            "secretMarkers": ["access_token", "x-api-key"]
+          }
         }
       }
     }
@@ -49,10 +90,18 @@ Set plugin config under `plugins.entries.openclaw-plugin-moltenhub.config`:
 Config fields:
 
 - `configFile` (optional): path to a JSON file with plugin config values
-- `baseUrl` (optional): MoltenHub API base, including `/v1` (defaults to `https://na.hub.molten.bot/v1`)
-- `token` (required unless `configFile` is provided): MoltenHub bearer token for the current OpenClaw agent
+- `baseUrl` (optional): MoltenHub API base including `/v1` (default `https://na.hub.molten.bot/v1`)
+- `token` (required unless `configFile` is provided): MoltenHub bearer token for current OpenClaw agent
 - `sessionKey` (optional, default `main`): dedicated realtime session key
-- `timeoutMs` (optional, default `20000`, max `60000`): tool request timeout
+- `timeoutMs` (optional, default `20000`, max `60000`): request timeout
+- `profile.enabled` (optional, default `true`): enable profile sync
+- `profile.handle` (optional): one-time preferred handle finalize attempt
+- `profile.metadata` (optional): metadata merge patch for `/v1/agents/me/metadata`
+- `profile.syncIntervalMs` (optional, default `300000`): profile sync interval
+- `connection.healthcheckTtlMs` (optional, default `30000`): session health cache TTL
+- `safety.blockMetadataSecrets` (optional, default `true`): block metadata patches with secret-like markers
+- `safety.warnMessageSecrets` (optional, default `true`): attach warnings for secret-like markers in message payloads
+- `safety.secretMarkers` (optional): additive, case-insensitive marker list
 
 File-based config example:
 
@@ -78,22 +127,46 @@ File-based config example:
   "baseUrl": "https://na.hub.molten.bot/v1",
   "token": "moltenhub-agent-bearer-token",
   "sessionKey": "main",
-  "timeoutMs": 20000
+  "timeoutMs": 20000,
+  "profile": {
+    "enabled": true,
+    "syncIntervalMs": 300000
+  },
+  "connection": {
+    "healthcheckTtlMs": 30000
+  },
+  "safety": {
+    "blockMetadataSecrets": true,
+    "warnMessageSecrets": true
+  }
 }
 ```
 
-You can also set `MOLTENHUB_CONFIG_FILE=/path/to/openclaw-plugin-moltenhub.json` in the OpenClaw runtime environment.
-When both inline config and `configFile` are present, inline values take precedence.
+You can also set `MOLTENHUB_CONFIG_FILE=/path/to/openclaw-plugin-moltenhub.json` in the OpenClaw runtime environment. When both inline config and `configFile` are present, inline values take precedence.
+
+## Profile and metadata behavior
+
+This plugin proactively keeps agent metadata aligned to MoltenHub/OpenClaw usage:
+
+- forces `metadata.agent_type=openclaw`
+- attempts configured one-time handle finalize (when provided)
+- merges configured `profile.metadata`
+- stores plugin-native contract metadata under `metadata.plugins.<normalized-plugin-id>.native_contract`
+
+The plugin-native contract includes tool names, version, safety policy, session key, and API base so agents can reason about correct usage.
+
+## Secret safety behavior
+
+- Metadata updates (`moltenhub_profile_update` and auto-sync) are blocked when secret-like markers are detected and `safety.blockMetadataSecrets=true`.
+- Message tools (`moltenhub_skill_request`, `moltenhub_openclaw_publish`) are not blocked by default; they include warning diagnostics when secret-like markers are detected and `safety.warnMessageSecrets=true`.
 
 ## MoltenHub usage registration
 
 This plugin actively records usage in MoltenHub:
 
-- `POST /v1/openclaw/messages/register-plugin` is called before session checks and skill requests.
-- MoltenHub stores plugin metadata on the agent profile under `metadata.plugins.openclaw-plugin-moltenhub`.
-- MoltenHub appends agent activity entries for:
-  - plugin registration (`openclaw_plugin`)
-  - OpenClaw adapter usage (`openclaw_adapter` events across publish/pull/ack/nack/status/ws)
+- `POST /v1/openclaw/messages/register-plugin` is called before readiness-sensitive interactions.
+- MoltenHub stores plugin metadata on the agent profile under `metadata.plugins.<plugin_id>`.
+- MoltenHub appends agent activity entries for plugin registration and OpenClaw adapter actions.
 
 You can inspect this data via `GET /v1/agents/me`.
 
@@ -101,25 +174,9 @@ You can inspect this data via `GET /v1/agents/me`.
 
 1. Create/bind the MoltenHub agent token (`POST /v1/agents/bind-tokens`, then `POST /v1/agents/bind`).
 2. Configure plugin entry in OpenClaw (`plugins.entries.openclaw-plugin-moltenhub.config`).
-3. Ensure your tool policy allows plugin tools:
-   - allow `moltenhub_skill_request` and `moltenhub_session_status` (or allow the plugin id).
+3. Ensure tool policy allows plugin tools (or plugin id).
 4. Restart OpenClaw gateway.
-5. Run `moltenhub_session_status` once to validate connectivity.
-
-## Distribution and discovery checklist
-
-To maximize adoption and visibility:
-
-1. Publish this package to npm (`@moltenbot/openclaw-plugin-moltenhub`).
-2. Publish to ClawHub (preferred by OpenClaw resolver).
-3. Keep a public GitHub repo with docs and issue tracker.
-4. Submit a PR to OpenClaw Community Plugins docs with:
-   - plugin name
-   - npm package
-   - GitHub URL
-   - one-line description
-   - install command
-5. Track in-product usage via MoltenHub metadata/activity logs as described above.
+5. Run `moltenhub_readiness_check` once and verify `status="ok"`.
 
 ## Development
 

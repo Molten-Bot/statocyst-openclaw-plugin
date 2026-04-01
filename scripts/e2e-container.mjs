@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { MoltenHubClient } from "../dist/index.js";
+import { createMoltenHubOpenClawPlugin, NATIVE_TOOL_NAMES } from "../dist/index.js";
 
 const moltenhubImage = process.env.MOLTENHUB_IMAGE || "moltenbot/moltenhub:latest";
 const moltenhubPort = Number.parseInt(process.env.MOLTENHUB_PORT || "18082", 10);
@@ -127,13 +127,6 @@ async function createAndApproveTrust(alice, bob, orgA, orgB, agentAUUID, agentBU
   await httpJSON("POST", `/v1/agent-trusts/${agentTrustID}/approve`, undefined, humanHeaders(bob.id, bob.email));
 }
 
-function runtimeResult(payload, routeName) {
-  if (!payload || payload.ok !== true || !payload.result) {
-    throw new Error(`${routeName} did not return runtime success envelope: ${JSON.stringify(payload)}`);
-  }
-  return payload.result;
-}
-
 function unwrapResult(payload) {
   if (payload && payload.ok === true && payload.result && typeof payload.result === "object") {
     return payload.result;
@@ -141,53 +134,66 @@ function unwrapResult(payload) {
   return payload;
 }
 
-async function responderLoop(agentBToken, agentAUUID) {
-  const deadlineMs = Date.now() + 45_000;
-  let deliveryID;
-  let requestID;
-  let lastPullPayload = null;
-  while (Date.now() < deadlineMs) {
-    const pullPayload = await httpJSON(
-      "GET",
-      "/v1/openclaw/messages/pull?timeout_ms=10000",
-      undefined,
-      runtimeHeaders(agentBToken)
-    );
-    lastPullPayload = pullPayload;
-    const pullResult = unwrapResult(pullPayload);
-    deliveryID = pullResult?.delivery?.delivery_id;
-    requestID = pullResult?.openclaw_message?.request_id;
-    if (deliveryID && requestID) {
-      break;
-    }
+function unwrapToolResult(payload) {
+  if (payload && typeof payload === "object" && payload.data !== undefined) {
+    return payload.data;
   }
-  assert.ok(deliveryID, `missing delivery_id from responder pull: ${JSON.stringify(lastPullPayload)}`);
-  assert.ok(requestID, `missing request_id from responder pull: ${JSON.stringify(lastPullPayload)}`);
+  const content = payload?.content;
+  if (Array.isArray(content) && content.length > 0 && typeof content[0]?.text === "string") {
+    return JSON.parse(content[0].text);
+  }
+  return payload;
+}
 
-  await httpJSON(
-    "POST",
-    "/v1/openclaw/messages/ack",
-    { delivery_id: deliveryID },
-    runtimeHeaders(agentBToken)
-  );
+function registerTools(config) {
+  const plugin = createMoltenHubOpenClawPlugin();
+  const tools = new Map();
 
-  await httpJSON(
-    "POST",
-    "/v1/openclaw/messages/publish",
-    {
-      to_agent_uuid: agentAUUID,
-      message: {
-        kind: "skill_result",
-        request_id: requestID,
-        skill_name: "echo_skill",
-        status: "ok",
-        output: {
-          reply: "pong"
-        }
+  plugin.register({
+    pluginConfig: config,
+    registerTool: (tool) => {
+      tools.set(tool.name, tool);
+    }
+  });
+
+  for (const toolName of NATIVE_TOOL_NAMES) {
+    assert.ok(tools.has(toolName), `missing expected native tool registration: ${toolName}`);
+  }
+
+  return async function callTool(name, params = {}) {
+    const tool = tools.get(name);
+    assert.ok(tool, `tool not found: ${name}`);
+    const result = await tool.execute(`call-${name}-${Date.now()}`, params);
+    return unwrapToolResult(result);
+  };
+}
+
+function buildPluginConfig(token, sessionKey) {
+  return {
+    baseUrl: apiBase,
+    token,
+    sessionKey,
+    timeoutMs: 45_000,
+    pluginId: "openclaw-plugin-moltenhub",
+    pluginPackage: "@moltenbot/openclaw-plugin-moltenhub",
+    pluginVersion: "0.1.6",
+    profile: {
+      enabled: true,
+      syncIntervalMs: 1_000,
+      metadata: {
+        llm: "openai/gpt-5.4@2026-03-01",
+        harness: "openclaw@latest"
       }
     },
-    runtimeHeaders(agentBToken)
-  );
+    connection: {
+      healthcheckTtlMs: 500
+    },
+    safety: {
+      blockMetadataSecrets: true,
+      warnMessageSecrets: true,
+      secretMarkers: ["x-api-key"]
+    }
+  };
 }
 
 async function waitForHealth() {
@@ -256,29 +262,126 @@ async function main() {
 
   await createAndApproveTrust(alice, bob, orgA, orgB, agentA.agentUUID, agentB.agentUUID);
 
-  const client = new MoltenHubClient({
-    baseUrl: apiBase,
-    token: agentA.token,
-    sessionKey: "e2e-main",
-    timeoutMs: 45000,
-    pluginId: "openclaw-plugin-moltenhub",
-    pluginPackage: "@moltenbot/openclaw-plugin-moltenhub",
-    pluginVersion: "0.1.4"
-  });
+  const callToolA = registerTools(buildPluginConfig(agentA.token, "e2e-main-a"));
+  const callToolB = registerTools(buildPluginConfig(agentB.token, "e2e-main-b"));
 
-  const requestPromise = client.requestSkillExecution({
+  const sessionStatus = await callToolA("moltenhub_session_status");
+  assert.equal(sessionStatus.status, "ok");
+
+  const readiness = await callToolA("moltenhub_readiness_check");
+  assert.equal(readiness.status, "ok");
+
+  const profileBefore = await callToolA("moltenhub_profile_get");
+  assert.ok(profileBefore.agent?.agent_uuid, "missing profile agent uuid");
+
+  const profileUpdate = await callToolA("moltenhub_profile_update", {
+    metadata: {
+      profile_markdown: "# Agent A\nReady for MoltenHub native tools",
+      activities: ["connected to moltenhub"],
+      hire_me: true,
+      llm: "openai/gpt-5.4@2026-03-01",
+      harness: "openclaw@latest",
+      skills: [
+        {
+          name: "echo_skill",
+          description: "echoes a short payload"
+        }
+      ]
+    }
+  });
+  assert.ok(profileUpdate.agent?.metadata, "missing updated metadata");
+
+  const profileAfter = await callToolA("moltenhub_profile_get");
+  assert.equal(profileAfter.agent?.metadata?.agent_type, "openclaw");
+
+  const capabilities = await callToolA("moltenhub_capabilities_get");
+  assert.ok(capabilities.control_plane, "missing control_plane in capabilities");
+
+  const manifestJSON = await callToolA("moltenhub_manifest_get", { format: "json" });
+  assert.ok(manifestJSON.manifest, "missing JSON manifest payload");
+
+  const manifestMarkdown = await callToolA("moltenhub_manifest_get", { format: "markdown" });
+  assert.equal(manifestMarkdown.format, "markdown");
+  assert.ok(
+    typeof manifestMarkdown.content === "string" && manifestMarkdown.content.length > 0,
+    "missing manifest markdown content"
+  );
+
+  const skillGuideMarkdown = await callToolA("moltenhub_skill_guide_get", { format: "md" });
+  assert.equal(skillGuideMarkdown.format, "markdown");
+  assert.ok(
+    typeof skillGuideMarkdown.content === "string" && skillGuideMarkdown.content.includes("Skill Call Contract"),
+    "missing skill guide markdown content"
+  );
+
+  await assert.rejects(
+    () =>
+      callToolA("moltenhub_profile_update", {
+        metadata: {
+          skills: [
+            {
+              name: "bad_skill",
+              description: "contains api key: shh"
+            }
+          ]
+        }
+      }),
+    /blocked by plugin safety policy/
+  );
+
+  const warningPublish = await callToolA("moltenhub_openclaw_publish", {
+    toAgentUUID: agentB.agentUUID,
+    message: {
+      kind: "agent_message",
+      text: "token: abc123"
+    }
+  });
+  assert.ok(Array.isArray(warningPublish.warnings) && warningPublish.warnings.length > 0, "expected payload warning");
+
+  const publishResult = await callToolA("moltenhub_openclaw_publish", {
+    toAgentUUID: agentB.agentUUID,
+    message: {
+      kind: "node_event",
+      session_key: "main",
+      text: "build complete",
+      data: {
+        exit_code: 0
+      }
+    }
+  });
+  const messageID = publishResult?.message_id;
+  assert.ok(messageID, "missing message_id from openclaw publish");
+
+  const baselinePull = await callToolB("moltenhub_openclaw_pull", { timeoutMs: 1_000 });
+  assert.ok(baselinePull && typeof baselinePull === "object", "missing openclaw pull response");
+
+  const statusResult = await callToolA("moltenhub_openclaw_status", { messageId: messageID });
+  assert.ok(statusResult.message || statusResult.message_id, "missing message status result");
+
+  const requestID = "req-e2e-1";
+  const requestPromise = callToolA("moltenhub_skill_request", {
     toAgentUUID: agentB.agentUUID,
     skillName: "echo_skill",
     input: { message: "ping" },
-    requestId: "req-e2e-1",
-    timeoutMs: 45000
+    requestId: requestID,
+    timeoutMs: 45_000
   });
 
-  const responderPromise = responderLoop(agentB.token, agentA.agentUUID);
+  await delay(250);
+  const syntheticSkillResult = await callToolB("moltenhub_openclaw_publish", {
+    toAgentUUID: agentA.agentUUID,
+    message: {
+      kind: "skill_result",
+      request_id: requestID,
+      status: "ok",
+      output: { reply: "pong" }
+    }
+  });
+  assert.ok(syntheticSkillResult.message_id, "missing message_id from synthetic skill_result publish");
 
-  const [result] = await Promise.all([requestPromise, responderPromise]);
-  assert.equal(result.status, "ok");
-  assert.deepEqual(result.output, { reply: "pong" });
+  const skillResult = await requestPromise;
+  assert.equal(skillResult.status, "ok");
+  assert.deepEqual(skillResult.output, { reply: "pong" });
 
   console.log("Container e2e passed.");
 }

@@ -1,10 +1,24 @@
 {
   "id": "openclaw-plugin-moltenhub",
   "name": "MoltenHub Realtime",
-  "description": "Realtime MoltenHub messaging and skill request/result tools for OpenClaw.",
-  "version": "0.1.5",
+  "description": "Native MoltenHub runtime plugin for OpenClaw: realtime skill exchange, OpenClaw adapter messaging, profile/capability tools, and safety guardrails.",
+  "version": "0.1.6",
   "contracts": {
-    "tools": ["moltenhub_skill_request", "moltenhub_session_status"]
+    "tools": [
+      "moltenhub_skill_request",
+      "moltenhub_session_status",
+      "moltenhub_readiness_check",
+      "moltenhub_profile_get",
+      "moltenhub_profile_update",
+      "moltenhub_capabilities_get",
+      "moltenhub_manifest_get",
+      "moltenhub_skill_guide_get",
+      "moltenhub_openclaw_publish",
+      "moltenhub_openclaw_pull",
+      "moltenhub_openclaw_ack",
+      "moltenhub_openclaw_nack",
+      "moltenhub_openclaw_status"
+    ]
   },
   "configSchema": {
     "type": "object",
@@ -40,6 +54,67 @@
         "type": "number",
         "description": "Request timeout in milliseconds",
         "default": 20000
+      },
+      "profile": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional profile auto-sync behavior for accurate, proactive agent profiles",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable profile auto-sync"
+          },
+          "handle": {
+            "type": "string",
+            "description": "Optional one-time preferred stable handle finalize"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Agent metadata merge patch applied during sync"
+          },
+          "syncIntervalMs": {
+            "type": "number",
+            "default": 300000,
+            "description": "Profile sync cadence in milliseconds"
+          }
+        }
+      },
+      "connection": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Connection/readiness behavior",
+        "properties": {
+          "healthcheckTtlMs": {
+            "type": "number",
+            "default": 30000,
+            "description": "Reuse recent websocket health checks for this many milliseconds"
+          }
+        }
+      },
+      "safety": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Secret-safety guardrails for plugin interactions",
+        "properties": {
+          "blockMetadataSecrets": {
+            "type": "boolean",
+            "default": true,
+            "description": "Block profile metadata updates containing secret-like markers"
+          },
+          "warnMessageSecrets": {
+            "type": "boolean",
+            "default": true,
+            "description": "Attach warnings when message payloads contain secret-like markers"
+          },
+          "secretMarkers": {
+            "type": "array",
+            "description": "Additional case-insensitive secret markers (additive)",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

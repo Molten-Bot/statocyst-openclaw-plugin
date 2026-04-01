@@ -6,7 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      include: ["src/plugin.ts", "src/moltenhub-client.ts"],
+      include: ["src/plugin.ts", "src/moltenhub-client.ts", "src/index.ts"],
       thresholds: {
         lines: 100,
         functions: 100,

@@ -4,10 +4,19 @@ import { resolve as resolvePath } from "node:path";
 import WebSocket, { type RawData } from "ws";
 
 import type {
+  AgentProfileUpdateRequest,
+  MoltenHubPluginConfig,
+  OpenClawDeliveryActionRequest,
+  OpenClawMessageStatusRequest,
+  OpenClawPublishRequest,
+  OpenClawPullRequest,
+  ReadinessCheckItem,
+  ReadinessCheckResult,
   ResolveConfigInput,
+  SecretWarning,
+  SessionStatusResult,
   SkillExecutionRequest,
-  SkillExecutionResult,
-  MoltenHubPluginConfig
+  SkillExecutionResult
 } from "./types.js";
 
 export interface WebSocketLike {
@@ -25,11 +34,48 @@ export interface MoltenHubClientDeps {
   randomID: () => string;
 }
 
+interface RuntimeRequestOptions {
+  allowNoContent?: boolean;
+}
+
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
-const defaultPluginVersion = "0.1.4";
+const defaultPluginVersion = "0.1.6";
 const defaultMoltenHubBaseURL = "https://na.hub.molten.bot/v1";
+const defaultProfileSyncIntervalMs = 300_000;
+const defaultHealthcheckTtlMs = 30_000;
+const defaultPullTimeoutMs = 5_000;
+
+const defaultSecretMarkers = [
+  "api key",
+  "api_key",
+  "apikey",
+  "access key",
+  "secret",
+  "password",
+  "passwd",
+  "private key",
+  "bearer ",
+  "token=",
+  "token:"
+];
+
+export const NATIVE_TOOL_NAMES = [
+  "moltenhub_skill_request",
+  "moltenhub_session_status",
+  "moltenhub_readiness_check",
+  "moltenhub_profile_get",
+  "moltenhub_profile_update",
+  "moltenhub_capabilities_get",
+  "moltenhub_manifest_get",
+  "moltenhub_skill_guide_get",
+  "moltenhub_openclaw_publish",
+  "moltenhub_openclaw_pull",
+  "moltenhub_openclaw_ack",
+  "moltenhub_openclaw_nack",
+  "moltenhub_openclaw_status"
+] as const;
 
 const defaultDeps: MoltenHubClientDeps = {
   fetchImpl: fetch,
@@ -37,6 +83,22 @@ const defaultDeps: MoltenHubClientDeps = {
   now: () => new Date(),
   randomID: () => randomUUID()
 };
+
+class MoltenHubAPIError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly nextAction: string;
+
+  constructor(message: string, status: number, code: string, retryable = false, nextAction = "") {
+    super(message);
+    this.name = "MoltenHubAPIError";
+    this.status = status;
+    this.code = code;
+    this.retryable = retryable;
+    this.nextAction = nextAction;
+  }
+}
 
 class MessageQueue {
   private queue: Record<string, unknown>[] = [];
@@ -116,9 +178,16 @@ class WebSocketSession {
 }
 
 export class MoltenHubClient {
+  private readonly config: MoltenHubPluginConfig;
   private readonly deps: MoltenHubClientDeps;
+  private lastSessionCheckAt = 0;
+  private lastProfileSyncAt = 0;
+  private handleFinalizeAttempted = false;
+  private cachedSessionStatus: SessionStatusResult | null = null;
+  private profileSyncInFlight: Promise<void> | null = null;
 
-  constructor(private readonly config: MoltenHubPluginConfig, deps?: Partial<MoltenHubClientDeps>) {
+  constructor(config: MoltenHubPluginConfig, deps?: Partial<MoltenHubClientDeps>) {
+    this.config = normalizeRuntimeConfig(config);
     this.deps = {
       ...defaultDeps,
       ...deps
@@ -148,18 +217,70 @@ export class MoltenHubClient {
     }
   }
 
-  async checkSession(): Promise<{ status: string; sessionKey: string; transport: string }> {
+  async checkSession(): Promise<SessionStatusResult> {
     await this.registerPlugin();
-    const session = await this.openSession(this.config.sessionKey, this.config.timeoutMs);
+    return this.checkSessionAfterRegistration();
+  }
+
+  async checkReadiness(): Promise<ReadinessCheckResult> {
+    const checks = {
+      pluginRegistration: readinessItem(),
+      profileSync: readinessItem(),
+      session: readinessItem(),
+      capabilities: readinessItem()
+    };
+
+    let canCommunicate: boolean | undefined;
+
     try {
-      return {
-        status: "ok",
-        sessionKey: this.config.sessionKey,
-        transport: "websocket"
-      };
-    } finally {
-      session.close();
+      await this.registerPlugin();
+      checks.pluginRegistration = readinessItem(true);
+    } catch (error) {
+      checks.pluginRegistration = readinessItem(false, String(error));
     }
+
+    if (!this.config.profile.enabled) {
+      checks.profileSync = readinessItem(true, undefined, true);
+    } else {
+      try {
+        await this.syncProfileIfDue(true);
+        checks.profileSync = readinessItem(true);
+      } catch (error) {
+        checks.profileSync = readinessItem(false, String(error));
+      }
+    }
+
+    try {
+      await this.checkSessionAfterRegistration();
+      checks.session = readinessItem(true);
+    } catch (error) {
+      checks.session = readinessItem(false, String(error));
+    }
+
+    try {
+      const capabilities = await this.getCapabilitiesRaw();
+      canCommunicate = readBoolean(
+        readObject(capabilities.control_plane).can_communicate ?? readObject(capabilities).can_communicate
+      );
+      checks.capabilities = readinessItem(true);
+    } catch (error) {
+      checks.capabilities = readinessItem(false, String(error));
+    }
+
+    const ok =
+      checks.pluginRegistration.ok &&
+      checks.profileSync.ok &&
+      checks.session.ok &&
+      checks.capabilities.ok;
+
+    return {
+      status: ok ? "ok" : "degraded",
+      baseUrl: this.config.baseUrl,
+      sessionKey: this.config.sessionKey,
+      transport: "websocket",
+      canCommunicate,
+      checks
+    };
   }
 
   async requestSkillExecution(request: SkillExecutionRequest): Promise<SkillExecutionResult> {
@@ -176,8 +297,9 @@ export class MoltenHubClient {
     const timeoutMs = normalizeTimeout(request.timeoutMs ?? this.config.timeoutMs);
     const requestId = trimOrEmpty(request.requestId) || this.deps.randomID();
     const sessionKey = trimOrEmpty(request.sessionKey) || this.config.sessionKey;
+    const warnings = this.maybeWarnPayload(request.input, "$.input");
 
-    await this.registerPlugin();
+    await this.ensureReady();
 
     const session = await this.openSession(sessionKey, timeoutMs);
     try {
@@ -234,7 +356,8 @@ export class MoltenHubClient {
               output: message.output,
               error: message.error,
               messageId: messageID,
-              deliveryId: deliveryID
+              deliveryId: deliveryID,
+              warnings: warnings.length > 0 ? warnings : undefined
             };
           }
 
@@ -256,6 +379,299 @@ export class MoltenHubClient {
     } finally {
       session.close();
     }
+  }
+
+  async getProfile(): Promise<Record<string, unknown>> {
+    await this.ensureReady();
+    return this.getProfileRaw();
+  }
+
+  async updateProfile(request: AgentProfileUpdateRequest): Promise<Record<string, unknown>> {
+    const metadata = readObject(request.metadata);
+    const warnings = this.collectSecretWarnings(metadata, "$.metadata");
+    if (warnings.length > 0 && this.config.safety.blockMetadataSecrets) {
+      throw new Error("metadata contains secret-like values and was blocked by plugin safety policy");
+    }
+
+    await this.ensureReady();
+    const result = await this.patchProfileRaw({
+      handle: trimOptional(request.handle),
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined
+    });
+
+    if (warnings.length === 0) {
+      return result;
+    }
+    return {
+      ...result,
+      warnings
+    };
+  }
+
+  async getCapabilities(): Promise<Record<string, unknown>> {
+    await this.ensureReady();
+    return this.getCapabilitiesRaw();
+  }
+
+  async getManifest(format: "json" | "markdown" = "json"): Promise<Record<string, unknown>> {
+    await this.ensureReady();
+    if (format === "markdown") {
+      const content = await this.runtimeText("/agents/me/manifest?format=markdown");
+      return {
+        format,
+        content
+      };
+    }
+    return this.runtimeJSON("GET", "/agents/me/manifest");
+  }
+
+  async getSkillGuide(format: "json" | "markdown" = "json"): Promise<Record<string, unknown>> {
+    await this.ensureReady();
+    if (format === "markdown") {
+      const content = await this.runtimeText("/agents/me/skill?format=markdown");
+      return {
+        format,
+        content
+      };
+    }
+    return this.runtimeJSON("GET", "/agents/me/skill");
+  }
+
+  async openClawPublish(request: OpenClawPublishRequest): Promise<Record<string, unknown>> {
+    const targetUUID = trimOrEmpty(request.toAgentUUID);
+    const targetURI = trimOrEmpty(request.toAgentURI);
+    const message = readObject(request.message);
+    if (!targetUUID && !targetURI) {
+      throw new Error("toAgentUUID or toAgentURI is required");
+    }
+    if (Object.keys(message).length === 0) {
+      throw new Error("message is required");
+    }
+
+    const warnings = this.maybeWarnPayload(message, "$.message");
+
+    await this.ensureReady();
+
+    const result = await this.runtimeJSON("POST", "/openclaw/messages/publish", {
+      to_agent_uuid: targetUUID || undefined,
+      to_agent_uri: targetURI || undefined,
+      client_msg_id: trimOptional(request.clientMsgID),
+      message
+    });
+
+    if (warnings.length === 0) {
+      return result;
+    }
+    return {
+      ...result,
+      warnings
+    };
+  }
+
+  async openClawPull(request: OpenClawPullRequest = {}): Promise<Record<string, unknown>> {
+    await this.ensureReady();
+
+    const timeoutMs = request.timeoutMs === undefined ? defaultPullTimeoutMs : normalizePullTimeout(request.timeoutMs);
+    const query = `?timeout_ms=${encodeURIComponent(String(timeoutMs))}`;
+    return this.runtimeJSON("GET", `/openclaw/messages/pull${query}`, undefined, { allowNoContent: true });
+  }
+
+  async openClawAck(request: OpenClawDeliveryActionRequest): Promise<Record<string, unknown>> {
+    const deliveryID = trimOrEmpty(request.deliveryId);
+    if (!deliveryID) {
+      throw new Error("deliveryId is required");
+    }
+
+    await this.ensureReady();
+    return this.runtimeJSON("POST", "/openclaw/messages/ack", {
+      delivery_id: deliveryID
+    });
+  }
+
+  async openClawNack(request: OpenClawDeliveryActionRequest): Promise<Record<string, unknown>> {
+    const deliveryID = trimOrEmpty(request.deliveryId);
+    if (!deliveryID) {
+      throw new Error("deliveryId is required");
+    }
+
+    await this.ensureReady();
+    return this.runtimeJSON("POST", "/openclaw/messages/nack", {
+      delivery_id: deliveryID
+    });
+  }
+
+  async openClawStatus(request: OpenClawMessageStatusRequest): Promise<Record<string, unknown>> {
+    const messageID = trimOrEmpty(request.messageId);
+    if (!messageID) {
+      throw new Error("messageId is required");
+    }
+
+    await this.ensureReady();
+    return this.runtimeJSON("GET", `/openclaw/messages/${encodeURIComponent(messageID)}`);
+  }
+
+  private async ensureReady(): Promise<void> {
+    await this.registerPlugin();
+    await this.syncProfileIfDue(false);
+    await this.ensureSessionHealthy(false);
+  }
+
+  private async ensureSessionHealthy(force: boolean): Promise<void> {
+    const now = Date.now();
+    if (!force && this.cachedSessionStatus && now-this.lastSessionCheckAt <= this.config.connection.healthcheckTtlMs) {
+      return;
+    }
+    await this.checkSessionAfterRegistration();
+  }
+
+  private async checkSessionAfterRegistration(): Promise<SessionStatusResult> {
+    const session = await this.openSession(this.config.sessionKey, this.config.timeoutMs);
+    try {
+      const status: SessionStatusResult = {
+        status: "ok",
+        sessionKey: this.config.sessionKey,
+        transport: "websocket"
+      };
+      this.cachedSessionStatus = status;
+      this.lastSessionCheckAt = Date.now();
+      return status;
+    } finally {
+      session.close();
+    }
+  }
+
+  private async syncProfileIfDue(force: boolean): Promise<void> {
+    if (!this.config.profile.enabled) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && now - this.lastProfileSyncAt < this.config.profile.syncIntervalMs) {
+      return;
+    }
+
+    if (this.profileSyncInFlight) {
+      await this.profileSyncInFlight;
+      return;
+    }
+
+    this.profileSyncInFlight = this.performProfileSync();
+    try {
+      await this.profileSyncInFlight;
+    } finally {
+      this.profileSyncInFlight = null;
+    }
+  }
+
+  private async performProfileSync(): Promise<void> {
+    const metadataPatch = this.buildProfileMetadataPatch();
+    const handle = this.nextHandleFinalizeValue();
+
+    const profileMetadata = readObject(this.config.profile.metadata);
+    const warnings = this.collectSecretWarnings(profileMetadata, "$.metadata");
+    if (warnings.length > 0 && this.config.safety.blockMetadataSecrets) {
+      throw new Error("profile sync metadata contains secret-like values and was blocked by plugin safety policy");
+    }
+
+    const payload: AgentProfileUpdateRequest = {
+      handle,
+      metadata: metadataPatch
+    };
+
+    try {
+      await this.patchProfileRaw(payload);
+    } catch (error) {
+      if (handle && this.shouldIgnoreHandleError(error)) {
+        await this.patchProfileRaw({ metadata: metadataPatch });
+      } else {
+        throw error;
+      }
+    }
+
+    this.lastProfileSyncAt = Date.now();
+  }
+
+  private nextHandleFinalizeValue(): string | undefined {
+    const requested = trimOrEmpty(this.config.profile.handle);
+    if (!requested || this.handleFinalizeAttempted) {
+      return undefined;
+    }
+    this.handleFinalizeAttempted = true;
+    return requested;
+  }
+
+  private shouldIgnoreHandleError(error: unknown): boolean {
+    if (error instanceof MoltenHubAPIError) {
+      return error.code === "agent_handle_locked" || error.code === "agent_exists";
+    }
+    const text = String(error).toLowerCase();
+    return text.includes("agent_handle_locked") || text.includes("agent_exists");
+  }
+
+  private buildProfileMetadataPatch(): Record<string, unknown> {
+    const baseMetadata = copyRecord(readObject(this.config.profile.metadata));
+    const pluginKey = normalizePluginMetadataKey(this.config.pluginId);
+
+    const metadataPatch: Record<string, unknown> = {
+      ...baseMetadata,
+      agent_type: "openclaw",
+      plugins: {
+        [pluginKey]: {
+          native_contract: {
+            schema_version: "1.0.0",
+            plugin_id: this.config.pluginId,
+            plugin_package: this.config.pluginPackage,
+            plugin_version: this.config.pluginVersion,
+            session_key: this.config.sessionKey,
+            api_base: this.config.baseUrl,
+            tool_names: [...NATIVE_TOOL_NAMES],
+            safety_policy: {
+              block_metadata_secrets: this.config.safety.blockMetadataSecrets,
+              warn_message_secrets: this.config.safety.warnMessageSecrets,
+              secret_markers: this.config.safety.secretMarkers
+            },
+            updated_at: this.deps.now().toISOString()
+          }
+        }
+      }
+    };
+
+    return deepMergeRecords(baseMetadata, metadataPatch);
+  }
+
+  private maybeWarnPayload(payload: unknown, path: string): SecretWarning[] {
+    if (!this.config.safety.warnMessageSecrets) {
+      return [];
+    }
+    return this.collectSecretWarnings(payload, path);
+  }
+
+  private collectSecretWarnings(payload: unknown, rootPath: string): SecretWarning[] {
+    return collectSecretWarnings(payload, this.config.safety.secretMarkers, rootPath);
+  }
+
+  private async getProfileRaw(): Promise<Record<string, unknown>> {
+    return this.runtimeJSON("GET", "/agents/me");
+  }
+
+  private async getCapabilitiesRaw(): Promise<Record<string, unknown>> {
+    return this.runtimeJSON("GET", "/agents/me/capabilities");
+  }
+
+  private async patchProfileRaw(request: AgentProfileUpdateRequest): Promise<Record<string, unknown>> {
+    const payload: Record<string, unknown> = {};
+    const handle = trimOptional(request.handle);
+    const metadata = readObject(request.metadata);
+    if (handle) {
+      payload.handle = handle;
+    }
+    if (Object.keys(metadata).length > 0) {
+      payload.metadata = metadata;
+    }
+    if (Object.keys(payload).length === 0) {
+      return this.getProfileRaw();
+    }
+    return this.runtimeJSON("PATCH", "/agents/me/metadata", payload);
   }
 
   private async openSession(sessionKey: string, timeoutMs: number): Promise<WebSocketSession> {
@@ -335,6 +751,129 @@ export class MoltenHubClient {
       delivery_id: deliveryID
     });
   }
+
+  private async runtimeJSON(
+    method: "GET" | "POST" | "PATCH",
+    path: string,
+    body?: Record<string, unknown>,
+    options?: RuntimeRequestOptions
+  ): Promise<Record<string, unknown>> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.config.token}`
+    };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const response = await this.deps.fetchImpl(this.runtimeURL(path), {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+
+    if (response.status === 204) {
+      if (options?.allowNoContent) {
+        return { status: "empty" };
+      }
+      return {};
+    }
+
+    const raw = await safeReadText(response);
+
+    if (!response.ok) {
+      throw parseRuntimeError(response.status, raw);
+    }
+
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = tryParseJSON(raw);
+    if (parsed === undefined) {
+      return { content: raw };
+    }
+
+    const parsedObject = readObject(parsed);
+    if (Object.keys(parsedObject).length === 0) {
+      return { value: parsed };
+    }
+
+    if (parsedObject.ok === false) {
+      throw parseRuntimeError(response.status, raw);
+    }
+
+    const result = parsedObject.result;
+    if (result !== undefined) {
+      const asRecord = readObject(result);
+      if (Object.keys(asRecord).length > 0) {
+        return asRecord;
+      }
+      return { value: result };
+    }
+
+    return parsedObject;
+  }
+
+  private async runtimeText(path: string): Promise<string> {
+    const response = await this.deps.fetchImpl(this.runtimeURL(path), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.config.token}`,
+        Accept: "text/markdown"
+      }
+    });
+
+    const raw = await safeReadText(response);
+    if (!response.ok) {
+      throw parseRuntimeError(response.status, raw);
+    }
+    return raw;
+  }
+
+  private runtimeURL(path: string): string {
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    return `${this.config.baseUrl}${normalizedPath}`;
+  }
+}
+
+function normalizeRuntimeConfig(config: MoltenHubPluginConfig): MoltenHubPluginConfig {
+  const unsafe = config as unknown as {
+    profile?: Partial<MoltenHubPluginConfig["profile"]>;
+    connection?: Partial<MoltenHubPluginConfig["connection"]>;
+    safety?: Partial<MoltenHubPluginConfig["safety"]>;
+  };
+
+  const profile = unsafe.profile ?? {};
+  const connection = unsafe.connection ?? {};
+  const safety = unsafe.safety ?? {};
+
+  return {
+    ...config,
+    profile: {
+      enabled: profile.enabled ?? true,
+      handle: trimOptional(profile.handle),
+      metadata: readObject(profile.metadata),
+      syncIntervalMs: normalizeBoundedNumber(
+        typeof profile.syncIntervalMs === "number" ? profile.syncIntervalMs : defaultProfileSyncIntervalMs,
+        10_000,
+        86_400_000,
+        defaultProfileSyncIntervalMs
+      )
+    },
+    connection: {
+      healthcheckTtlMs: normalizeBoundedNumber(
+        typeof connection.healthcheckTtlMs === "number" ? connection.healthcheckTtlMs : defaultHealthcheckTtlMs,
+        1_000,
+        3_600_000,
+        defaultHealthcheckTtlMs
+      )
+    },
+    safety: {
+      blockMetadataSecrets: safety.blockMetadataSecrets ?? true,
+      warnMessageSecrets: safety.warnMessageSecrets ?? true,
+      secretMarkers: normalizeSecretMarkers(readStringArray(safety.secretMarkers))
+    }
+  };
 }
 
 export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfig {
@@ -353,7 +892,9 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
       defaultMoltenHubBaseURL
   );
   const token = trimOrEmpty(asString(config.token) || asString(fileConfig.token) || env.MOLTENHUB_AGENT_TOKEN || "");
-  const sessionKey = trimOrEmpty(asString(config.sessionKey) || asString(fileConfig.sessionKey) || env.MOLTENHUB_SESSION_KEY || "main");
+  const sessionKey = trimOrEmpty(
+    asString(config.sessionKey) || asString(fileConfig.sessionKey) || env.MOLTENHUB_SESSION_KEY || "main"
+  );
   const timeoutMs = normalizeTimeout(
     asNumber(config.timeoutMs) ?? asNumber(fileConfig.timeoutMs) ?? asNumber(env.MOLTENHUB_TIMEOUT_MS) ?? defaultTimeoutMs
   );
@@ -364,6 +905,73 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
   const pluginVersion = trimOrEmpty(
     asString(config.pluginVersion) || asString(fileConfig.pluginVersion) || defaultPluginVersion
   );
+
+  const fileProfile = readObject(fileConfig.profile);
+  const inlineProfile = readObject(config.profile);
+  const profileEnabled =
+    asBoolean(inlineProfile.enabled) ??
+    asBoolean(config.profileEnabled) ??
+    asBoolean(fileProfile.enabled) ??
+    asBoolean(env.MOLTENHUB_PROFILE_ENABLED) ??
+    true;
+  const profileHandle =
+    trimOrEmpty(
+      asString(inlineProfile.handle) ||
+        asString(config.profileHandle) ||
+        asString(fileProfile.handle) ||
+        env.MOLTENHUB_PROFILE_HANDLE ||
+        ""
+    ) || undefined;
+  const profileMetadata = deepMergeRecords(
+    readObject(fileProfile.metadata),
+    readObject(config.profileMetadata),
+    readObject(inlineProfile.metadata)
+  );
+  const profileSyncIntervalMs = normalizeBoundedNumber(
+    asNumber(inlineProfile.syncIntervalMs) ??
+      asNumber(config.profileSyncIntervalMs) ??
+      asNumber(fileProfile.syncIntervalMs) ??
+      asNumber(env.MOLTENHUB_PROFILE_SYNC_INTERVAL_MS) ??
+      defaultProfileSyncIntervalMs,
+    10_000,
+    86_400_000,
+    defaultProfileSyncIntervalMs
+  );
+
+  const fileConnection = readObject(fileConfig.connection);
+  const inlineConnection = readObject(config.connection);
+  const healthcheckTtlMs = normalizeBoundedNumber(
+    asNumber(inlineConnection.healthcheckTtlMs) ??
+      asNumber(config.healthcheckTtlMs) ??
+      asNumber(fileConnection.healthcheckTtlMs) ??
+      asNumber(env.MOLTENHUB_HEALTHCHECK_TTL_MS) ??
+      defaultHealthcheckTtlMs,
+    1_000,
+    3_600_000,
+    defaultHealthcheckTtlMs
+  );
+
+  const fileSafety = readObject(fileConfig.safety);
+  const inlineSafety = readObject(config.safety);
+  const blockMetadataSecrets =
+    asBoolean(inlineSafety.blockMetadataSecrets) ??
+    asBoolean(config.blockMetadataSecrets) ??
+    asBoolean(fileSafety.blockMetadataSecrets) ??
+    asBoolean(env.MOLTENHUB_BLOCK_METADATA_SECRETS) ??
+    true;
+  const warnMessageSecrets =
+    asBoolean(inlineSafety.warnMessageSecrets) ??
+    asBoolean(config.warnMessageSecrets) ??
+    asBoolean(fileSafety.warnMessageSecrets) ??
+    asBoolean(env.MOLTENHUB_WARN_MESSAGE_SECRETS) ??
+    true;
+  const secretMarkers = normalizeSecretMarkers([
+    ...readStringArray(fileConfig.secretMarkers),
+    ...readStringArray(fileSafety.secretMarkers),
+    ...readStringArray(config.secretMarkers),
+    ...readStringArray(inlineSafety.secretMarkers),
+    ...splitCommaSeparated(asString(env.MOLTENHUB_SECRET_MARKERS))
+  ]);
 
   if (!token) {
     throw new Error("MoltenHub plugin configuration requires token");
@@ -376,7 +984,30 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
     timeoutMs,
     pluginId,
     pluginPackage,
-    pluginVersion
+    pluginVersion,
+    profile: {
+      enabled: profileEnabled,
+      handle: profileHandle,
+      metadata: Object.keys(profileMetadata).length > 0 ? profileMetadata : undefined,
+      syncIntervalMs: profileSyncIntervalMs
+    },
+    connection: {
+      healthcheckTtlMs
+    },
+    safety: {
+      blockMetadataSecrets,
+      warnMessageSecrets,
+      secretMarkers
+    }
+  };
+}
+
+function readinessItem(ok = false, error?: string, skipped = false): ReadinessCheckItem {
+  return {
+    ok,
+    skipped: skipped || undefined,
+    error,
+    checkedAt: new Date().toISOString()
   };
 }
 
@@ -472,11 +1103,52 @@ function normalizeTimeout(raw: number): number {
   return Math.trunc(raw);
 }
 
+function normalizePullTimeout(raw: number): number {
+  if (!Number.isFinite(raw)) {
+    return defaultPullTimeoutMs;
+  }
+  if (raw < 0 || raw > 30_000) {
+    throw new Error("timeoutMs must be between 0 and 30000");
+  }
+  return Math.trunc(raw);
+}
+
+function normalizeBoundedNumber(raw: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(raw)) {
+    return fallback;
+  }
+  const normalized = Math.trunc(raw);
+  if (normalized < min) {
+    return min;
+  }
+  if (normalized > max) {
+    return max;
+  }
+  return normalized;
+}
+
+function normalizePluginMetadataKey(pluginID: string): string {
+  let key = trimOrEmpty(pluginID).toLowerCase();
+  if (!key) {
+    key = "moltenhub-openclaw";
+  }
+  key = key.replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!key) {
+    return "moltenhub_openclaw";
+  }
+  return key;
+}
+
 function trimOrEmpty(value: unknown): string {
   if (typeof value !== "string") {
     return "";
   }
   return value.trim();
+}
+
+function trimOptional(value: unknown): string | undefined {
+  const trimmed = trimOrEmpty(value);
+  return trimmed || undefined;
 }
 
 function asString(value: unknown): string {
@@ -500,11 +1172,176 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function asBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
 function readObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object") {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+}
+
+function copyRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function deepMergeRecords(...records: Record<string, unknown>[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      const existing = out[key];
+      if (isRecord(existing) && isRecord(value)) {
+        out[key] = deepMergeRecords(existing, value);
+      } else {
+        out[key] = value;
+      }
+    }
+  }
+  return out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => trimOrEmpty(entry))
+      .filter((entry) => entry.length > 0);
+  }
+  if (typeof value === "string") {
+    return splitCommaSeparated(value);
+  }
+  return [];
+}
+
+function splitCommaSeparated(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function normalizeSecretMarkers(customMarkers: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const marker of [...defaultSecretMarkers, ...customMarkers]) {
+    const normalized = marker.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    merged.push(normalized);
+  }
+  return merged;
+}
+
+function collectSecretWarnings(payload: unknown, markers: string[], rootPath: string): SecretWarning[] {
+  const warnings: SecretWarning[] = [];
+  walkPayload(payload, rootPath, markers, warnings);
+  return warnings;
+}
+
+function walkPayload(
+  value: unknown,
+  path: string,
+  markers: string[],
+  warnings: SecretWarning[],
+  maxWarnings = 20
+): void {
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    for (const marker of markers) {
+      if (normalized.includes(marker)) {
+        warnings.push({
+          fieldPath: path,
+          marker,
+          message: `Potential secret marker detected at ${path}`
+        });
+        return;
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (warnings.length >= maxWarnings) {
+        return;
+      }
+      walkPayload(item, `${path}[${index}]`, markers, warnings, maxWarnings);
+    });
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (warnings.length >= maxWarnings) {
+      return;
+    }
+    walkPayload(child, `${path}.${key}`, markers, warnings, maxWarnings);
+  }
+}
+
+function parseRuntimeError(status: number, bodyText: string): MoltenHubAPIError {
+  const fallbackCode = "http_error";
+  const fallbackMessage = bodyText || `request failed with status ${status}`;
+  const parsed = tryParseJSON(bodyText);
+
+  if (!isRecord(parsed)) {
+    return new MoltenHubAPIError(fallbackMessage, status, fallbackCode);
+  }
+
+  const topLevelCode = trimOrEmpty(parsed.error);
+  const topLevelMessage = trimOrEmpty(parsed.message);
+  const topLevelRetryable = readBoolean(parsed.retryable) ?? false;
+  const topLevelNextAction = trimOrEmpty(parsed.next_action);
+
+  const nestedError = readObject(parsed.error);
+  const nestedCode = trimOrEmpty(nestedError.code);
+  const nestedMessage = trimOrEmpty(nestedError.message);
+
+  const code = nestedCode || topLevelCode || fallbackCode;
+  const message = nestedMessage || topLevelMessage || fallbackMessage;
+
+  return new MoltenHubAPIError(message, status, code, topLevelRetryable, topLevelNextAction);
+}
+
+function tryParseJSON(raw: string): unknown {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 async function safeReadText(response: Response): Promise<string> {
