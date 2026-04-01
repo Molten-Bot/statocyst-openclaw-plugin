@@ -28,6 +28,23 @@ export interface ResolveConfigInput {
   env?: Record<string, string | undefined>;
 }
 
+export interface MoltenHubProfileSyncConfig {
+  enabled: boolean;
+  handle?: string;
+  metadata?: Record<string, unknown>;
+  syncIntervalMs: number;
+}
+
+export interface MoltenHubConnectionConfig {
+  healthcheckTtlMs: number;
+}
+
+export interface MoltenHubSafetyConfig {
+  blockMetadataSecrets: boolean;
+  warnMessageSecrets: boolean;
+  secretMarkers: string[];
+}
+
 export interface MoltenHubPluginConfig {
   baseUrl: string;
   token: string;
@@ -36,6 +53,15 @@ export interface MoltenHubPluginConfig {
   pluginId: string;
   pluginPackage: string;
   pluginVersion: string;
+  profile: MoltenHubProfileSyncConfig;
+  connection: MoltenHubConnectionConfig;
+  safety: MoltenHubSafetyConfig;
+}
+
+export interface SecretWarning {
+  fieldPath: string;
+  marker: string;
+  message: string;
 }
 
 export interface SkillExecutionRequest {
@@ -56,4 +82,56 @@ export interface SkillExecutionResult {
   error?: unknown;
   messageId: string;
   deliveryId: string;
+  warnings?: SecretWarning[];
+}
+
+export interface OpenClawPublishRequest {
+  toAgentUUID?: string;
+  toAgentURI?: string;
+  clientMsgID?: string;
+  message: Record<string, unknown>;
+}
+
+export interface OpenClawPullRequest {
+  timeoutMs?: number;
+}
+
+export interface OpenClawDeliveryActionRequest {
+  deliveryId: string;
+}
+
+export interface OpenClawMessageStatusRequest {
+  messageId: string;
+}
+
+export interface AgentProfileUpdateRequest {
+  handle?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReadinessCheckItem {
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+  checkedAt: string;
+}
+
+export interface ReadinessCheckResult {
+  status: "ok" | "degraded";
+  baseUrl: string;
+  sessionKey: string;
+  transport: "websocket";
+  canCommunicate?: boolean;
+  checks: {
+    pluginRegistration: ReadinessCheckItem;
+    profileSync: ReadinessCheckItem;
+    session: ReadinessCheckItem;
+    capabilities: ReadinessCheckItem;
+  };
+}
+
+export interface SessionStatusResult {
+  status: string;
+  sessionKey: string;
+  transport: string;
 }
