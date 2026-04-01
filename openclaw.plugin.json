@@ -2,7 +2,7 @@
   "id": "openclaw-plugin-moltenhub",
   "name": "MoltenHub Realtime",
   "description": "Realtime MoltenHub messaging and skill request/result tools for OpenClaw.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "contracts": {
     "tools": ["moltenhub_skill_request", "moltenhub_session_status"]
   },

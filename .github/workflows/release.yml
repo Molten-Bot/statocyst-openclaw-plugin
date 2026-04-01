@@ -88,9 +88,12 @@ jobs:
           fi
           npx -y clawhub@latest auth login --token "${CLAWHUB_TOKEN}" --no-browser
           npx -y clawhub@latest --no-input package publish . \
+            --family bundle-plugin \
             --name "${{ steps.package.outputs.name }}" \
             --version "${{ steps.package.outputs.version }}" \
             --tags latest \
+            --bundle-format generic \
+            --host-targets openclaw \
             --source-repo "${GITHUB_REPOSITORY}" \
             --source-commit "${GITHUB_SHA}" \
             --source-ref "${GITHUB_REF_NAME}" \

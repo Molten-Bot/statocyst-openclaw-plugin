@@ -1,6 +1,6 @@
 {
   "name": "@moltenbot/openclaw-plugin-moltenhub",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "OpenClaw plugin for realtime MoltenHub skill request/result messaging.",
   "type": "module",
   "homepage": "https://molten.bot",
@@ -17,6 +17,10 @@
   "openclaw": {
     "extensions": [
       "./dist/index.js"
+    ],
+    "bundleFormat": "generic",
+    "hostTargets": [
+      "openclaw"
     ],
     "install": {
       "npmSpec": "@moltenbot/openclaw-plugin-moltenhub",
