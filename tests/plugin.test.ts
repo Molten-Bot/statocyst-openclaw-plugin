@@ -214,6 +214,35 @@ describe("createMoltenHubOpenClawPlugin", () => {
     });
   });
 
+  it("normalizes explicit json payload format", async () => {
+    const ctx = setupPluginWithMockClient();
+    ctx.plugin.register(ctx.api);
+
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
+    await skillTool!.execute("call-2c", {
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "weather_lookup",
+      payload: {
+        city: "Seattle"
+      },
+      payloadFormat: "json"
+    });
+
+    expect(ctx.requestSkillExecution).toHaveBeenLastCalledWith({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      toAgentURI: undefined,
+      skillName: "weather_lookup",
+      payload: {
+        city: "Seattle"
+      },
+      payloadFormat: "json",
+      input: undefined,
+      timeoutMs: undefined,
+      sessionKey: undefined,
+      requestId: undefined
+    });
+  });
+
   it("runs session and readiness tools", async () => {
     const ctx = setupPluginWithMockClient();
     ctx.plugin.register(ctx.api);

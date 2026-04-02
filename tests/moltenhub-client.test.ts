@@ -255,6 +255,225 @@ describe("MoltenHubClient", () => {
     expect(sentSkillRequest?.input).toBe("# hello");
   });
 
+  it("rejects markdown payload format when payload is not a string", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const wsFactory = vi.fn(() => new FakeWebSocket());
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl,
+      wsFactory
+    });
+
+    await expect(
+      client.requestSkillExecution({
+        toAgentUUID: "11111111-1111-1111-1111-111111111111",
+        skillName: "bad_markdown",
+        payloadFormat: "markdown",
+        payload: {
+          text: "not-allowed"
+        }
+      })
+    ).rejects.toThrow("payloadFormat=markdown requires a string payload");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(wsFactory).not.toHaveBeenCalled();
+  });
+
+  it("rejects json payload format when payload string is not valid json", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const wsFactory = vi.fn(() => new FakeWebSocket());
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl,
+      wsFactory
+    });
+
+    await expect(
+      client.requestSkillExecution({
+        toAgentUUID: "11111111-1111-1111-1111-111111111111",
+        skillName: "bad_json",
+        payloadFormat: "json",
+        payload: "{bad-json"
+      })
+    ).rejects.toThrow("payloadFormat=json requires a JSON payload");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(wsFactory).not.toHaveBeenCalled();
+  });
+
+  it("parses json payload strings when payloadFormat=json", async () => {
+    let sentSkillRequest: Record<string, unknown> | undefined;
+
+    const socket = new FakeWebSocket((payload, current) => {
+      if (payload.type === "publish") {
+        sentSkillRequest = (payload.message ?? {}) as Record<string, unknown>;
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 202,
+          result: {}
+        });
+        current.emitMessage({
+          type: "delivery",
+          result: {
+            message: { message_id: "message-json-string" },
+            delivery: { delivery_id: "delivery-json-string" },
+            openclaw_message: {
+              kind: "skill_result",
+              request_id: "req-json-string",
+              status: "ok",
+              output: "done"
+            }
+          }
+        });
+      }
+      if (payload.type === "ack") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 200,
+          result: {}
+        });
+      }
+    });
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl: fetchOKSpy(),
+      randomID: () => "req-json-string",
+      wsFactory: () => {
+        openAndReady(socket);
+        return socket;
+      }
+    });
+
+    await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "json_echo",
+      payloadFormat: "json",
+      payload: "{\"city\":\"Seattle\"}"
+    });
+
+    expect(sentSkillRequest?.payload_format).toBe("json");
+    expect(sentSkillRequest?.payload).toEqual({ city: "Seattle" });
+    expect(sentSkillRequest?.input).toEqual({ city: "Seattle" });
+  });
+
+  it("infers markdown payload format when payload is a string", async () => {
+    let sentSkillRequest: Record<string, unknown> | undefined;
+
+    const socket = new FakeWebSocket((payload, current) => {
+      if (payload.type === "publish") {
+        sentSkillRequest = (payload.message ?? {}) as Record<string, unknown>;
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 202,
+          result: {}
+        });
+        current.emitMessage({
+          type: "delivery",
+          result: {
+            message: { message_id: "message-inferred-markdown" },
+            delivery: { delivery_id: "delivery-inferred-markdown" },
+            openclaw_message: {
+              kind: "skill_result",
+              request_id: "req-inferred-markdown",
+              status: "ok",
+              output: "done"
+            }
+          }
+        });
+      }
+      if (payload.type === "ack") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 200,
+          result: {}
+        });
+      }
+    });
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl: fetchOKSpy(),
+      randomID: () => "req-inferred-markdown",
+      wsFactory: () => {
+        openAndReady(socket);
+        return socket;
+      }
+    });
+
+    await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "markdown_auto",
+      payload: "# inferred"
+    });
+
+    expect(sentSkillRequest?.payload_format).toBe("markdown");
+    expect(sentSkillRequest?.payload).toBe("# inferred");
+  });
+
+  it("defaults markdown payload to empty string when payload is omitted", async () => {
+    let sentSkillRequest: Record<string, unknown> | undefined;
+
+    const socket = new FakeWebSocket((payload, current) => {
+      if (payload.type === "publish") {
+        sentSkillRequest = (payload.message ?? {}) as Record<string, unknown>;
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 202,
+          result: {}
+        });
+        current.emitMessage({
+          type: "delivery",
+          result: {
+            message: { message_id: "message-empty-markdown" },
+            delivery: { delivery_id: "delivery-empty-markdown" },
+            openclaw_message: {
+              kind: "skill_result",
+              request_id: "req-empty-markdown",
+              status: "ok",
+              output: "done"
+            }
+          }
+        });
+      }
+      if (payload.type === "ack") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 200,
+          result: {}
+        });
+      }
+    });
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl: fetchOKSpy(),
+      randomID: () => "req-empty-markdown",
+      wsFactory: () => {
+        openAndReady(socket);
+        return socket;
+      }
+    });
+
+    await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "markdown_empty",
+      payloadFormat: "markdown"
+    });
+
+    expect(sentSkillRequest?.payload_format).toBe("markdown");
+    expect(sentSkillRequest?.payload).toBe("");
+  });
+
   it("nacks unrelated deliveries before returning matching result", async () => {
     let nackDeliveryID = "";
 
@@ -814,6 +1033,391 @@ describe("MoltenHubClient", () => {
       calls.some((call) => call.method === "GET" && call.path.startsWith("/v1/openclaw/messages/pull?timeout_ms="))
     ).toBe(true);
     expect(calls.some((call) => call.method === "POST" && call.path === "/v1/openclaw/messages/ack")).toBe(true);
+  });
+
+  it("falls back mid-request and processes empty/unrelated pull deliveries", async () => {
+    let wsConnectCount = 0;
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    let pullCount = 0;
+
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestURL = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      const path = requestURL.pathname + requestURL.search;
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      calls.push({ method, path, body });
+
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/register-plugin") {
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/publish") {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: "message-mid-fallback" } }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/openclaw/messages/pull") {
+        pullCount += 1;
+        if (pullCount === 1) {
+          return new Response(null, { status: 204 });
+        }
+        if (pullCount === 2) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              result: {
+                delivery: { delivery_id: "delivery-unrelated-kind" },
+                message: {
+                  message_id: "message-unrelated-kind",
+                  kind: "agent_message",
+                  request_id: "different-request"
+                }
+              }
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (pullCount === 3) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              result: {
+                delivery: { delivery_id: "delivery-unrelated-empty" },
+                message: {
+                  message_id: "message-unrelated-empty"
+                }
+              }
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              message: { message_id: "message-final-mid-fallback" },
+              delivery: { delivery_id: "delivery-final-mid-fallback" },
+              openclaw_message: {
+                kind: "skill_result",
+                request_id: "req-mid-fallback",
+                status: "ok",
+                output: "done"
+              }
+            }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/nack") {
+        return new Response(JSON.stringify({ ok: true, result: { status: "nacked" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/ack") {
+        return new Response(JSON.stringify({ ok: true, result: { status: "acked" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const wsFactory = vi.fn(() => {
+      wsConnectCount += 1;
+      const socket = new FakeWebSocket();
+      queueMicrotask(() => {
+        if (wsConnectCount === 1) {
+          socket.emitOpen();
+          setTimeout(() => {
+            socket.emitMessage({ type: "session_ready", session_key: "main" });
+          }, 0);
+          return;
+        }
+        socket.emitError("Unexpected server response: 404");
+      });
+      return socket;
+    });
+
+    const client = new MoltenHubClient(
+      {
+        ...testConfig(),
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      },
+      {
+        fetchImpl,
+        wsFactory,
+        randomID: () => "req-mid-fallback"
+      }
+    );
+
+    const result = await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "fallback_with_queue"
+    });
+
+    expect(result).toMatchObject({
+      requestId: "req-mid-fallback",
+      status: "ok",
+      output: "done",
+      messageId: "message-final-mid-fallback",
+      deliveryId: "delivery-final-mid-fallback"
+    });
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+    expect(calls.filter((call) => call.method === "POST" && call.path === "/v1/openclaw/messages/nack")).toHaveLength(2);
+    expect(calls.filter((call) => call.method === "POST" && call.path === "/v1/openclaw/messages/ack")).toHaveLength(1);
+  });
+
+  it("reports http-pull readiness transport when websocket routes are unavailable", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestURL = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/register-plugin") {
+        return new Response(
+          JSON.stringify({
+            error: "route_not_found",
+            error_detail: {
+              code: "route_not_found",
+              message: "missing route"
+            }
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/agents/me/capabilities") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              control_plane: {
+                can_communicate: true
+              }
+            }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const wsFactory = vi.fn(() => {
+      const socket = new FakeWebSocket();
+      queueMicrotask(() => {
+        socket.emitError("Unexpected server response: 404");
+      });
+      return socket;
+    });
+
+    const client = new MoltenHubClient(
+      {
+        ...testConfig(),
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      },
+      {
+        fetchImpl,
+        wsFactory
+      }
+    );
+
+    const readiness = await client.checkReadiness();
+    expect(readiness.transport).toBe("http-pull");
+    expect(readiness.checks.session.ok).toBe(true);
+    expect(readiness.checks.capabilities.ok).toBe(true);
+  });
+
+  it("times out while waiting for pull-based skill result", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestURL = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/register-plugin") {
+        return new Response(
+          JSON.stringify({
+            error: "route_not_found",
+            error_detail: {
+              code: "route_not_found",
+              message: "missing route"
+            }
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/agents/me/capabilities") {
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/publish") {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: "message-timeout" } }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/openclaw/messages/pull") {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const wsFactory = vi.fn(() => {
+      const socket = new FakeWebSocket();
+      queueMicrotask(() => {
+        socket.emitError("Unexpected server response: 404");
+      });
+      return socket;
+    });
+
+    const client = new MoltenHubClient(
+      {
+        ...testConfig(),
+        timeoutMs: 1,
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      },
+      {
+        fetchImpl,
+        wsFactory,
+        randomID: () => "req-timeout-pull"
+      }
+    );
+
+    await expect(
+      client.requestSkillExecution({
+        toAgentURI: "https://example.test/agents/peer-timeout",
+        skillName: "timeout_pull"
+      })
+    ).rejects.toThrow("timed out waiting for skill_result for request_id=req-timeout-pull");
+  });
+
+  it("uses top-level pull ids and returns default status with warnings in pull fallback mode", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestURL = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/register-plugin") {
+        return new Response(
+          JSON.stringify({
+            error: "route_not_found",
+            error_detail: {
+              code: "route_not_found",
+              message: "missing route"
+            }
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/agents/me/capabilities") {
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/publish") {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: "message-top-level" } }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "GET" && requestURL.pathname === "/v1/openclaw/messages/pull") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              message_id: "message-top-level",
+              delivery_id: "delivery-top-level",
+              openclaw_message: {
+                kind: "skill_result",
+                request_id: "req-top-level-pull",
+                output: {
+                  ok: true
+                }
+              }
+            }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (method === "POST" && requestURL.pathname === "/v1/openclaw/messages/ack") {
+        return new Response(JSON.stringify({ ok: true, result: { status: "acked" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const wsFactory = vi.fn(() => {
+      const socket = new FakeWebSocket();
+      queueMicrotask(() => {
+        socket.emitError("Unexpected server response: 404");
+      });
+      return socket;
+    });
+
+    const client = new MoltenHubClient(
+      {
+        ...testConfig(),
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        },
+        safety: {
+          blockMetadataSecrets: false,
+          warnMessageSecrets: true,
+          secretMarkers: ["token"]
+        }
+      },
+      {
+        fetchImpl,
+        wsFactory,
+        randomID: () => "req-top-level-pull"
+      }
+    );
+
+    const result = await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "top_level_pull",
+      payload: {
+        note: "token:abc"
+      }
+    });
+
+    expect(result).toMatchObject({
+      requestId: "req-top-level-pull",
+      status: "ok",
+      output: {
+        ok: true
+      },
+      messageId: "message-top-level",
+      deliveryId: "delivery-top-level"
+    });
+    expect(Array.isArray(result.warnings)).toBe(true);
+    expect((result.warnings ?? []).length).toBeGreaterThan(0);
   });
 
   it("times out waiting for publish response", async () => {
