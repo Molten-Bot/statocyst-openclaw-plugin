@@ -68,6 +68,8 @@ export interface SkillExecutionRequest {
   toAgentUUID?: string;
   toAgentURI?: string;
   skillName: string;
+  payload?: unknown;
+  payloadFormat?: "json" | "markdown";
   input?: unknown;
   timeoutMs?: number;
   sessionKey?: string;
@@ -120,7 +122,7 @@ export interface ReadinessCheckResult {
   status: "ok" | "degraded";
   baseUrl: string;
   sessionKey: string;
-  transport: "websocket";
+  transport: "websocket" | "http-pull";
   canCommunicate?: boolean;
   checks: {
     pluginRegistration: ReadinessCheckItem;

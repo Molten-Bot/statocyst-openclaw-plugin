@@ -183,6 +183,7 @@ export class MoltenHubClient {
   private lastSessionCheckAt = 0;
   private lastProfileSyncAt = 0;
   private handleFinalizeAttempted = false;
+  private pluginRegistrationSupported = true;
   private cachedSessionStatus: SessionStatusResult | null = null;
   private profileSyncInFlight: Promise<void> | null = null;
 
@@ -194,7 +195,11 @@ export class MoltenHubClient {
     };
   }
 
-  async registerPlugin(): Promise<void> {
+  async registerPlugin(): Promise<boolean> {
+    if (!this.pluginRegistrationSupported) {
+      return false;
+    }
+
     const response = await this.deps.fetchImpl(`${this.config.baseUrl}/openclaw/messages/register-plugin`, {
       method: "POST",
       headers: {
@@ -213,8 +218,13 @@ export class MoltenHubClient {
 
     if (!response.ok) {
       const body = await safeReadText(response);
+      if (this.isRegistrationRouteUnsupported(response.status, body)) {
+        this.pluginRegistrationSupported = false;
+        return false;
+      }
       throw new Error(`moltenhub plugin registration failed (${response.status}): ${body}`);
     }
+    return true;
   }
 
   async checkSession(): Promise<SessionStatusResult> {
@@ -231,10 +241,19 @@ export class MoltenHubClient {
     };
 
     let canCommunicate: boolean | undefined;
+    let sessionTransport: ReadinessCheckResult["transport"] = "websocket";
 
     try {
-      await this.registerPlugin();
-      checks.pluginRegistration = readinessItem(true);
+      const registered = await this.registerPlugin();
+      if (registered) {
+        checks.pluginRegistration = readinessItem(true);
+      } else {
+        checks.pluginRegistration = readinessItem(
+          true,
+          "registration route unavailable; continuing without explicit plugin registration",
+          true
+        );
+      }
     } catch (error) {
       checks.pluginRegistration = readinessItem(false, String(error));
     }
@@ -251,7 +270,9 @@ export class MoltenHubClient {
     }
 
     try {
-      await this.checkSessionAfterRegistration();
+      const session = await this.checkSessionAfterRegistration();
+      const normalizedTransport = trimOrEmpty(session.transport);
+      sessionTransport = normalizedTransport === "http-pull" ? "http-pull" : "websocket";
       checks.session = readinessItem(true);
     } catch (error) {
       checks.session = readinessItem(false, String(error));
@@ -277,7 +298,7 @@ export class MoltenHubClient {
       status: ok ? "ok" : "degraded",
       baseUrl: this.config.baseUrl,
       sessionKey: this.config.sessionKey,
-      transport: "websocket",
+      transport: sessionTransport,
       canCommunicate,
       checks
     };
@@ -297,32 +318,100 @@ export class MoltenHubClient {
     const timeoutMs = normalizeTimeout(request.timeoutMs ?? this.config.timeoutMs);
     const requestId = trimOrEmpty(request.requestId) || this.deps.randomID();
     const sessionKey = trimOrEmpty(request.sessionKey) || this.config.sessionKey;
-    const warnings = this.maybeWarnPayload(request.input, "$.input");
+    const payloadInput = request.payload !== undefined ? request.payload : request.input;
+    const payload = this.normalizeSkillPayload(payloadInput, request.payloadFormat);
+    const warnings = this.maybeWarnPayload(payload.payload, "$.payload");
 
     await this.ensureReady();
 
-    const session = await this.openSession(sessionKey, timeoutMs);
+    if (this.cachedSessionStatus?.transport === "http-pull") {
+      return this.requestSkillExecutionOverPull({
+        targetUUID,
+        targetURI,
+        skillName,
+        payload: payload.payload,
+        payloadFormat: payload.format,
+        requestId,
+        sessionKey,
+        timeoutMs,
+        warnings
+      });
+    }
+
     try {
-      const publishRequestID = `publish:${requestId}`;
+      return await this.requestSkillExecutionOverWebSocket({
+        targetUUID,
+        targetURI,
+        skillName,
+        payload: payload.payload,
+        payloadFormat: payload.format,
+        requestId,
+        sessionKey,
+        timeoutMs,
+        warnings
+      });
+    } catch (error) {
+      if (!this.isWebSocketRouteUnsupported(error)) {
+        throw error;
+      }
+
+      const fallbackStatus: SessionStatusResult = {
+        status: "ok",
+        sessionKey,
+        transport: "http-pull"
+      };
+      this.cachedSessionStatus = fallbackStatus;
+      this.lastSessionCheckAt = Date.now();
+
+      return this.requestSkillExecutionOverPull({
+        targetUUID,
+        targetURI,
+        skillName,
+        payload: payload.payload,
+        payloadFormat: payload.format,
+        requestId,
+        sessionKey,
+        timeoutMs,
+        warnings
+      });
+    }
+  }
+
+  private async requestSkillExecutionOverWebSocket(args: {
+    targetUUID: string;
+    targetURI: string;
+    skillName: string;
+    payload: unknown;
+    payloadFormat: "json" | "markdown";
+    requestId: string;
+    sessionKey: string;
+    timeoutMs: number;
+    warnings: SecretWarning[];
+  }): Promise<SkillExecutionResult> {
+    const session = await this.openSession(args.sessionKey, args.timeoutMs);
+    try {
+      const publishRequestID = `publish:${args.requestId}`;
       await session.send({
         type: "publish",
         request_id: publishRequestID,
-        to_agent_uuid: targetUUID || undefined,
-        to_agent_uri: targetURI || undefined,
+        to_agent_uuid: args.targetUUID || undefined,
+        to_agent_uri: args.targetURI || undefined,
         message: {
           kind: "skill_request",
-          request_id: requestId,
-          skill_name: skillName,
+          request_id: args.requestId,
+          skill_name: args.skillName,
           reply_required: true,
-          input: request.input,
-          session_key: sessionKey,
+          payload: args.payload,
+          payload_format: args.payloadFormat,
+          input: args.payload,
+          session_key: args.sessionKey,
           timestamp: this.deps.now().toISOString()
         }
       });
 
-      await this.waitForResponse(session, publishRequestID, timeoutMs);
+      await this.waitForResponse(session, publishRequestID, args.timeoutMs);
 
-      const deadline = Date.now() + timeoutMs;
+      const deadline = Date.now() + args.timeoutMs;
       for (;;) {
         const remaining = deadline - Date.now();
         const waitMs = Math.max(1, remaining);
@@ -330,7 +419,7 @@ export class MoltenHubClient {
         try {
           payload = await session.next(waitMs);
         } catch {
-          throw new Error(`timed out waiting for skill_result for request_id=${requestId}`);
+          throw new Error(`timed out waiting for skill_result for request_id=${args.requestId}`);
         }
         const payloadType = trimOrEmpty(payload.type);
         if (payloadType === "__error__") {
@@ -347,17 +436,17 @@ export class MoltenHubClient {
           const kind = trimOrEmpty(message.kind);
           const resultRequestID = trimOrEmpty(message.request_id);
 
-          if (kind === "skill_result" && resultRequestID === requestId) {
-            await this.ackDelivery(session, deliveryID, timeoutMs);
+          if (kind === "skill_result" && resultRequestID === args.requestId) {
+            await this.ackDelivery(session, deliveryID, args.timeoutMs);
             return {
-              requestId,
-              skillName,
+              requestId: args.requestId,
+              skillName: args.skillName,
               status: trimOrEmpty(message.status) || "ok",
               output: message.output,
               error: message.error,
               messageId: messageID,
               deliveryId: deliveryID,
-              warnings: warnings.length > 0 ? warnings : undefined
+              warnings: args.warnings.length > 0 ? args.warnings : undefined
             };
           }
 
@@ -378,6 +467,97 @@ export class MoltenHubClient {
       }
     } finally {
       session.close();
+    }
+  }
+
+  private async requestSkillExecutionOverPull(args: {
+    targetUUID: string;
+    targetURI: string;
+    skillName: string;
+    payload: unknown;
+    payloadFormat: "json" | "markdown";
+    requestId: string;
+    sessionKey: string;
+    timeoutMs: number;
+    warnings: SecretWarning[];
+  }): Promise<SkillExecutionResult> {
+    await this.runtimeJSON("POST", "/openclaw/messages/publish", {
+      to_agent_uuid: args.targetUUID || undefined,
+      to_agent_uri: args.targetURI || undefined,
+      client_msg_id: args.requestId,
+      message: {
+        kind: "skill_request",
+        request_id: args.requestId,
+        skill_name: args.skillName,
+        reply_required: true,
+        payload: args.payload,
+        payload_format: args.payloadFormat,
+        input: args.payload,
+        session_key: args.sessionKey,
+        timestamp: this.deps.now().toISOString()
+      }
+    });
+
+    const deadline = Date.now() + args.timeoutMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`timed out waiting for skill_result for request_id=${args.requestId}`);
+      }
+
+      const pullTimeoutMs = Math.max(0, Math.min(defaultPullTimeoutMs, remaining));
+      const pullResult = await this.runtimeJSON(
+        "GET",
+        `/openclaw/messages/pull?timeout_ms=${encodeURIComponent(String(pullTimeoutMs))}`,
+        undefined,
+        { allowNoContent: true }
+      );
+      if (trimOrEmpty(pullResult.status) === "empty") {
+        continue;
+      }
+
+      const deliveryID = trimOrEmpty(
+        readObject(pullResult.delivery).delivery_id ?? trimOptional(asString(pullResult.delivery_id))
+      );
+      const messageID = trimOrEmpty(
+        readObject(pullResult.message).message_id ?? trimOptional(asString(pullResult.message_id))
+      );
+
+      const primaryMessage = readObject(pullResult.openclaw_message);
+      const fallbackMessage = readObject(pullResult.message);
+      const message =
+        Object.keys(primaryMessage).length > 0
+          ? primaryMessage
+          : trimOrEmpty(fallbackMessage.kind)
+            ? fallbackMessage
+            : {};
+
+      const kind = trimOrEmpty(message.kind);
+      const resultRequestID = trimOrEmpty(message.request_id);
+
+      if (kind === "skill_result" && resultRequestID === args.requestId) {
+        if (deliveryID) {
+          await this.runtimeJSON("POST", "/openclaw/messages/ack", {
+            delivery_id: deliveryID
+          });
+        }
+        return {
+          requestId: args.requestId,
+          skillName: args.skillName,
+          status: trimOrEmpty(message.status) || "ok",
+          output: message.output,
+          error: message.error,
+          messageId: messageID,
+          deliveryId: deliveryID,
+          warnings: args.warnings.length > 0 ? args.warnings : undefined
+        };
+      }
+
+      if (deliveryID) {
+        await this.runtimeJSON("POST", "/openclaw/messages/nack", {
+          delivery_id: deliveryID
+        });
+      }
     }
   }
 
@@ -518,26 +698,65 @@ export class MoltenHubClient {
 
   private async ensureSessionHealthy(force: boolean): Promise<void> {
     const now = Date.now();
-    if (!force && this.cachedSessionStatus && now-this.lastSessionCheckAt <= this.config.connection.healthcheckTtlMs) {
+    if (!force && this.cachedSessionStatus && now - this.lastSessionCheckAt <= this.config.connection.healthcheckTtlMs) {
       return;
     }
     await this.checkSessionAfterRegistration();
   }
 
   private async checkSessionAfterRegistration(): Promise<SessionStatusResult> {
-    const session = await this.openSession(this.config.sessionKey, this.config.timeoutMs);
     try {
+      const session = await this.openSession(this.config.sessionKey, this.config.timeoutMs);
+      try {
+        const status: SessionStatusResult = {
+          status: "ok",
+          sessionKey: this.config.sessionKey,
+          transport: "websocket"
+        };
+        this.cachedSessionStatus = status;
+        this.lastSessionCheckAt = Date.now();
+        return status;
+      } finally {
+        session.close();
+      }
+    } catch (error) {
+      if (!this.isWebSocketRouteUnsupported(error)) {
+        throw error;
+      }
+
+      await this.getCapabilitiesRaw();
+
       const status: SessionStatusResult = {
         status: "ok",
         sessionKey: this.config.sessionKey,
-        transport: "websocket"
+        transport: "http-pull"
       };
       this.cachedSessionStatus = status;
       this.lastSessionCheckAt = Date.now();
       return status;
-    } finally {
-      session.close();
     }
+  }
+
+  private isRegistrationRouteUnsupported(status: number, body: string): boolean {
+    if (status === 404 || status === 405 || status === 501) {
+      return true;
+    }
+    const parsed = readObject(tryParseJSON(body));
+    const errorObject = readObject(parsed.error);
+    const detailObject = readObject(parsed.error_detail);
+    const code =
+      trimOrEmpty(parsed.error) || trimOrEmpty(errorObject.code) || trimOrEmpty(detailObject.code) || "";
+    return (
+      code === "not_found" ||
+      code === "route_not_found" ||
+      code === "method_not_allowed" ||
+      code === "not_implemented"
+    );
+  }
+
+  private isWebSocketRouteUnsupported(error: unknown): boolean {
+    const message = String(error);
+    return /unexpected server response:\s*(404|405|426)\b/i.test(message);
   }
 
   private async syncProfileIfDue(force: boolean): Promise<void> {
@@ -644,6 +863,42 @@ export class MoltenHubClient {
       return [];
     }
     return this.collectSecretWarnings(payload, path);
+  }
+
+  private normalizeSkillPayload(
+    payload: unknown,
+    requestedFormat: SkillExecutionRequest["payloadFormat"]
+  ): { payload: unknown; format: "json" | "markdown" } {
+    const normalizedFormat =
+      requestedFormat === "json" || requestedFormat === "markdown"
+        ? requestedFormat
+        : typeof payload === "string"
+          ? "markdown"
+          : "json";
+
+    if (normalizedFormat === "markdown") {
+      if (payload === undefined || payload === null) {
+        return { payload: "", format: "markdown" };
+      }
+      if (typeof payload !== "string") {
+        throw new Error("payloadFormat=markdown requires a string payload");
+      }
+      return { payload, format: "markdown" };
+    }
+
+    if (payload === undefined) {
+      return { payload: {}, format: "json" };
+    }
+
+    if (typeof payload === "string") {
+      const parsed = tryParseJSON(payload);
+      if (parsed === undefined) {
+        throw new Error("payloadFormat=json requires a JSON payload");
+      }
+      return { payload: parsed, format: "json" };
+    }
+
+    return { payload, format: "json" };
   }
 
   private collectSecretWarnings(payload: unknown, rootPath: string): SecretWarning[] {

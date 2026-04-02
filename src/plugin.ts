@@ -51,8 +51,16 @@ const skillRequestInputSchema: Record<string, unknown> = {
       type: "string",
       description: "Peer advertised skill name to execute"
     },
+    payload: {
+      description: "Skill payload body (JSON value or markdown string)"
+    },
+    payloadFormat: {
+      type: "string",
+      description: "Payload format. Defaults to json unless payload is a string.",
+      enum: ["json", "markdown", "md"]
+    },
     input: {
-      description: "Skill input payload"
+      description: "Deprecated alias for payload"
     },
     timeoutMs: {
       type: "number",
@@ -192,15 +200,30 @@ const openClawStatusInputSchema: Record<string, unknown> = {
 };
 
 function parseSkillExecutionRequest(input: Record<string, unknown>): SkillExecutionRequest {
+  const payloadFormat = parseSkillPayloadFormat(input.payloadFormat);
+  const payload = input.payload !== undefined ? input.payload : input.input;
   return {
     toAgentUUID: asTrimmedString(input.toAgentUUID),
     toAgentURI: asTrimmedString(input.toAgentURI),
     skillName: asTrimmedString(input.skillName) ?? "",
+    payload,
+    payloadFormat,
     input: input.input,
     timeoutMs: asNumber(input.timeoutMs),
     sessionKey: asTrimmedString(input.sessionKey),
     requestId: asTrimmedString(input.requestId)
   };
+}
+
+function parseSkillPayloadFormat(value: unknown): "json" | "markdown" | undefined {
+  const raw = asTrimmedString(value)?.toLowerCase();
+  if (raw === "json") {
+    return "json";
+  }
+  if (raw === "md" || raw === "markdown") {
+    return "markdown";
+  }
+  return undefined;
 }
 
 function parseProfileUpdateRequest(input: Record<string, unknown>): AgentProfileUpdateRequest {
@@ -304,7 +327,7 @@ function skillRequestTool(client: () => MoltenHubClientContract): OpenClawToolDe
   return {
     name: "moltenhub_skill_request",
     description:
-      "Send a MoltenHub skill_request envelope to a peer and wait for the corresponding skill_result over the realtime websocket bus. Includes secret-safety warnings when payload markers are detected.",
+      "Send a MoltenHub skill_request envelope (`skill_name` + `payload` in json/markdown format) to a peer and wait for the matching skill_result. Includes secret-safety warnings when payload markers are detected.",
     parameters: skillRequestInputSchema,
     execute: async (_callID, params) => {
       const request = parseSkillExecutionRequest(asRecord(params));
@@ -317,7 +340,7 @@ function skillRequestTool(client: () => MoltenHubClientContract): OpenClawToolDe
 function sessionStatusTool(client: () => MoltenHubClientContract): OpenClawToolDefinition {
   return {
     name: "moltenhub_session_status",
-    description: "Check MoltenHub realtime websocket connectivity for this plugin session.",
+    description: "Check MoltenHub runtime connectivity for this plugin session.",
     parameters: sessionStatusInputSchema,
     execute: async () => {
       const result = await client().checkSession();
@@ -330,7 +353,7 @@ function readinessTool(client: () => MoltenHubClientContract): OpenClawToolDefin
   return {
     name: "moltenhub_readiness_check",
     description:
-      "Run plugin registration, profile-sync, websocket session, and capability checks to verify this agent is connected and ready.",
+      "Run plugin registration/profile-sync/runtime connectivity/capability checks to verify this agent is connected and ready.",
     parameters: readinessInputSchema,
     execute: async () => {
       const result = await client().checkReadiness();

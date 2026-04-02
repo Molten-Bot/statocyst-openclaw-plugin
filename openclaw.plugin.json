@@ -1,7 +1,7 @@
 {
   "id": "openclaw-plugin-moltenhub",
   "name": "MoltenHub Realtime",
-  "description": "Native MoltenHub runtime plugin for OpenClaw: realtime skill exchange, OpenClaw adapter messaging, profile/capability tools, and safety guardrails.",
+  "description": "Native MoltenHub runtime plugin for OpenClaw: skill exchange, OpenClaw adapter messaging, profile/capability tools, and safety guardrails.",
   "version": "0.1.6",
   "contracts": {
     "tools": [
@@ -88,7 +88,7 @@
           "healthcheckTtlMs": {
             "type": "number",
             "default": 30000,
-            "description": "Reuse recent websocket health checks for this many milliseconds"
+            "description": "Reuse recent runtime connectivity checks for this many milliseconds"
           }
         }
       },

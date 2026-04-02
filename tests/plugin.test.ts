@@ -156,6 +156,8 @@ describe("createMoltenHubOpenClawPlugin", () => {
       toAgentUUID: "11111111-1111-1111-1111-111111111111",
       toAgentURI: undefined,
       skillName: "weather_lookup",
+      payload: { city: "Seattle" },
+      payloadFormat: undefined,
       input: { city: "Seattle" },
       timeoutMs: 500,
       sessionKey: "main",
@@ -178,6 +180,33 @@ describe("createMoltenHubOpenClawPlugin", () => {
       toAgentUUID: "11111111-1111-1111-1111-111111111111",
       toAgentURI: undefined,
       skillName: "weather_lookup",
+      payload: undefined,
+      payloadFormat: undefined,
+      input: undefined,
+      timeoutMs: undefined,
+      sessionKey: undefined,
+      requestId: undefined
+    });
+  });
+
+  it("normalizes explicit markdown payload fields", async () => {
+    const ctx = setupPluginWithMockClient();
+    ctx.plugin.register(ctx.api);
+
+    const skillTool = ctx.tools.find((tool) => tool.name === "moltenhub_skill_request");
+    await skillTool!.execute("call-2b", {
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "weather_lookup",
+      payload: "# hello",
+      payloadFormat: "md"
+    });
+
+    expect(ctx.requestSkillExecution).toHaveBeenLastCalledWith({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      toAgentURI: undefined,
+      skillName: "weather_lookup",
+      payload: "# hello",
+      payloadFormat: "markdown",
       input: undefined,
       timeoutMs: undefined,
       sessionKey: undefined,
@@ -307,6 +336,8 @@ describe("createMoltenHubOpenClawPlugin", () => {
       toAgentUUID: "11111111-1111-1111-1111-111111111111",
       toAgentURI: undefined,
       skillName: "",
+      payload: undefined,
+      payloadFormat: undefined,
       input: undefined,
       timeoutMs: undefined,
       sessionKey: undefined,

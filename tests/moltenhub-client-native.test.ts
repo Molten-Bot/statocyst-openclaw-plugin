@@ -297,6 +297,43 @@ describe("MoltenHubClient native runtime", () => {
     expect(readiness.checks.capabilities.error).toContain("caps down");
   });
 
+  it("treats missing register-plugin route as skipped readiness check", async () => {
+    const harness = createHarness({
+      config: {
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      }
+    });
+
+    harness.route("POST", "/v1/openclaw/messages/register-plugin", () =>
+      jsonResponse(
+        {
+          error: "route_not_found",
+          error_detail: {
+            code: "route_not_found",
+            message: "missing route"
+          }
+        },
+        404
+      )
+    );
+    harness.route("GET", "/v1/agents/me/capabilities", () => jsonResponse({ ok: true, result: { can_communicate: true } }));
+
+    const readiness = await harness.client.checkReadiness();
+    await harness.client.getCapabilities();
+    await harness.client.getCapabilities();
+
+    expect(readiness.status).toBe("ok");
+    expect(readiness.checks.pluginRegistration.ok).toBe(true);
+    expect(readiness.checks.pluginRegistration.skipped).toBe(true);
+    expect(readiness.transport).toBe("websocket");
+
+    const registrationCalls = harness.calls.filter((call) => call.path === "/v1/openclaw/messages/register-plugin");
+    expect(registrationCalls).toHaveLength(1);
+  });
+
   it("gets profile data through runtime JSON API", async () => {
     const harness = createHarness({
       config: {
@@ -1014,7 +1051,7 @@ describe("MoltenHubClient native runtime", () => {
 
     expect(result.status).toBe("ok");
     expect(Array.isArray(result.warnings)).toBe(true);
-    expect((result.warnings as Array<{ fieldPath: string }>)[0]?.fieldPath).toContain("$.input");
+    expect((result.warnings as Array<{ fieldPath: string }>)[0]?.fieldPath).toContain("$.payload");
   });
 
   it("covers runtimeJSON envelope normalization and error parsing branches", async () => {
