@@ -545,6 +545,120 @@ describe("MoltenHubClient", () => {
     expect(nackDeliveryID).toBe("delivery-x");
   });
 
+  it("preserves matching skill_result delivery that arrives before publish response", async () => {
+    let sawUnexpectedNack = false;
+
+    const socket = new FakeWebSocket((payload, current) => {
+      if (payload.type === "publish") {
+        current.emitMessage({
+          type: "delivery",
+          result: {
+            message: { message_id: "message-pre-response" },
+            delivery: { delivery_id: "delivery-pre-response" },
+            openclaw_message: {
+              kind: "skill_result",
+              request_id: "req-pre-response",
+              status: "ok",
+              output: "pre-response"
+            }
+          }
+        });
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 202,
+          result: {}
+        });
+      }
+      if (payload.type === "nack" && payload.delivery_id === "delivery-pre-response") {
+        sawUnexpectedNack = true;
+      }
+      if (payload.type === "ack") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 200,
+          result: {}
+        });
+      }
+    });
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl: fetchOKSpy(),
+      randomID: () => "req-pre-response",
+      wsFactory: () => {
+        openAndReady(socket);
+        return socket;
+      }
+    });
+
+    const result = await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "summarize"
+    });
+
+    expect(result.output).toBe("pre-response");
+    expect(result.messageId).toBe("message-pre-response");
+    expect(result.deliveryId).toBe("delivery-pre-response");
+    expect(sawUnexpectedNack).toBe(false);
+  });
+
+  it("accepts websocket deliveries that encode skill_result under result.message", async () => {
+    const socket = new FakeWebSocket((payload, current) => {
+      if (payload.type === "publish") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 202,
+          result: {}
+        });
+        current.emitMessage({
+          type: "delivery",
+          result: {
+            message: {
+              message_id: "message-message-shape",
+              kind: "skill_result",
+              request_id: "req-message-shape",
+              status: "ok",
+              output: { ok: true }
+            },
+            delivery: { delivery_id: "delivery-message-shape" }
+          }
+        });
+      }
+      if (payload.type === "ack") {
+        current.emitMessage({
+          type: "response",
+          ok: true,
+          request_id: payload.request_id,
+          status: 200,
+          result: {}
+        });
+      }
+    });
+
+    const client = new MoltenHubClient(testConfig(), {
+      fetchImpl: fetchOKSpy(),
+      randomID: () => "req-message-shape",
+      wsFactory: () => {
+        openAndReady(socket);
+        return socket;
+      }
+    });
+
+    const result = await client.requestSkillExecution({
+      toAgentUUID: "11111111-1111-1111-1111-111111111111",
+      skillName: "summarize"
+    });
+
+    expect(result.output).toEqual({ ok: true });
+    expect(result.messageId).toBe("message-message-shape");
+    expect(result.deliveryId).toBe("delivery-message-shape");
+  });
+
   it("throws when websocket closes before result is delivered", async () => {
     const socket = new FakeWebSocket((payload, current) => {
       if (payload.type === "publish") {

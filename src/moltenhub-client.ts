@@ -38,6 +38,16 @@ interface RuntimeRequestOptions {
   allowNoContent?: boolean;
 }
 
+interface ParsedDelivery {
+  deliveryId: string;
+  messageId: string;
+  message: Record<string, unknown>;
+}
+
+interface WaitForResponseOptions {
+  preserveSkillResultRequestId?: string;
+}
+
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
@@ -390,6 +400,11 @@ export class MoltenHubClient {
   }): Promise<SkillExecutionResult> {
     const session = await this.openSession(args.sessionKey, args.timeoutMs);
     try {
+      const skillContext = {
+        requestId: args.requestId,
+        skillName: args.skillName,
+        warnings: args.warnings
+      };
       const publishRequestID = `publish:${args.requestId}`;
       await session.send({
         type: "publish",
@@ -409,7 +424,17 @@ export class MoltenHubClient {
         }
       });
 
-      await this.waitForResponse(session, publishRequestID, args.timeoutMs);
+      const preservedDelivery = await this.waitForResponse(session, publishRequestID, args.timeoutMs, {
+        preserveSkillResultRequestId: args.requestId
+      });
+      if (preservedDelivery) {
+        const parsedDelivery = this.parseDeliveryRecord(readObject(preservedDelivery.result));
+        const matchedResult = this.toSkillExecutionResult(skillContext, parsedDelivery);
+        if (matchedResult) {
+          await this.ackDelivery(session, parsedDelivery.deliveryId, args.timeoutMs);
+          return matchedResult;
+        }
+      }
 
       const deadline = Date.now() + args.timeoutMs;
       for (;;) {
@@ -430,28 +455,16 @@ export class MoltenHubClient {
         }
 
         if (payloadType === "delivery") {
-          const message = readObject(readObject(payload.result).openclaw_message);
-          const deliveryID = trimOrEmpty(readObject(readObject(payload.result).delivery).delivery_id);
-          const messageID = trimOrEmpty(readObject(readObject(payload.result).message).message_id);
-          const kind = trimOrEmpty(message.kind);
-          const resultRequestID = trimOrEmpty(message.request_id);
+          const parsedDelivery = this.parseDeliveryRecord(readObject(payload.result));
+          const matchedResult = this.toSkillExecutionResult(skillContext, parsedDelivery);
 
-          if (kind === "skill_result" && resultRequestID === args.requestId) {
-            await this.ackDelivery(session, deliveryID, args.timeoutMs);
-            return {
-              requestId: args.requestId,
-              skillName: args.skillName,
-              status: trimOrEmpty(message.status) || "ok",
-              output: message.output,
-              error: message.error,
-              messageId: messageID,
-              deliveryId: deliveryID,
-              warnings: args.warnings.length > 0 ? args.warnings : undefined
-            };
+          if (matchedResult) {
+            await this.ackDelivery(session, parsedDelivery.deliveryId, args.timeoutMs);
+            return matchedResult;
           }
 
-          if (deliveryID) {
-            await this.nackDelivery(session, deliveryID);
+          if (parsedDelivery.deliveryId) {
+            await this.nackDelivery(session, parsedDelivery.deliveryId);
           }
           continue;
         }
@@ -481,6 +494,12 @@ export class MoltenHubClient {
     timeoutMs: number;
     warnings: SecretWarning[];
   }): Promise<SkillExecutionResult> {
+    const skillContext = {
+      requestId: args.requestId,
+      skillName: args.skillName,
+      warnings: args.warnings
+    };
+
     await this.runtimeJSON("POST", "/openclaw/messages/publish", {
       to_agent_uuid: args.targetUUID || undefined,
       to_agent_uri: args.targetURI || undefined,
@@ -516,46 +535,21 @@ export class MoltenHubClient {
         continue;
       }
 
-      const deliveryID = trimOrEmpty(
-        readObject(pullResult.delivery).delivery_id ?? trimOptional(asString(pullResult.delivery_id))
-      );
-      const messageID = trimOrEmpty(
-        readObject(pullResult.message).message_id ?? trimOptional(asString(pullResult.message_id))
-      );
+      const parsedDelivery = this.parseDeliveryRecord(pullResult);
+      const matchedResult = this.toSkillExecutionResult(skillContext, parsedDelivery);
 
-      const primaryMessage = readObject(pullResult.openclaw_message);
-      const fallbackMessage = readObject(pullResult.message);
-      const message =
-        Object.keys(primaryMessage).length > 0
-          ? primaryMessage
-          : trimOrEmpty(fallbackMessage.kind)
-            ? fallbackMessage
-            : {};
-
-      const kind = trimOrEmpty(message.kind);
-      const resultRequestID = trimOrEmpty(message.request_id);
-
-      if (kind === "skill_result" && resultRequestID === args.requestId) {
-        if (deliveryID) {
+      if (matchedResult) {
+        if (parsedDelivery.deliveryId) {
           await this.runtimeJSON("POST", "/openclaw/messages/ack", {
-            delivery_id: deliveryID
+            delivery_id: parsedDelivery.deliveryId
           });
         }
-        return {
-          requestId: args.requestId,
-          skillName: args.skillName,
-          status: trimOrEmpty(message.status) || "ok",
-          output: message.output,
-          error: message.error,
-          messageId: messageID,
-          deliveryId: deliveryID,
-          warnings: args.warnings.length > 0 ? args.warnings : undefined
-        };
+        return matchedResult;
       }
 
-      if (deliveryID) {
+      if (parsedDelivery.deliveryId) {
         await this.runtimeJSON("POST", "/openclaw/messages/nack", {
-          delivery_id: deliveryID
+          delivery_id: parsedDelivery.deliveryId
         });
       }
     }
@@ -948,7 +942,23 @@ export class MoltenHubClient {
     return session;
   }
 
-  private async waitForResponse(session: WebSocketSession, requestID: string, timeoutMs: number): Promise<void> {
+  private async waitForResponse(
+    session: WebSocketSession,
+    requestID: string,
+    timeoutMs: number
+  ): Promise<Record<string, unknown> | undefined>;
+  private async waitForResponse(
+    session: WebSocketSession,
+    requestID: string,
+    timeoutMs: number,
+    options: WaitForResponseOptions
+  ): Promise<Record<string, unknown> | undefined>;
+  private async waitForResponse(
+    session: WebSocketSession,
+    requestID: string,
+    timeoutMs: number,
+    options: WaitForResponseOptions = {}
+  ): Promise<Record<string, unknown> | undefined> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const remaining = deadline - Date.now();
@@ -967,9 +977,18 @@ export class MoltenHubClient {
       }
       if (trimOrEmpty(payload.type) !== "response") {
         if (trimOrEmpty(payload.type) === "delivery") {
-          const deliveryID = trimOrEmpty(readObject(readObject(payload.result).delivery).delivery_id);
-          if (deliveryID) {
-            await this.nackDelivery(session, deliveryID);
+          const parsedDelivery = this.parseDeliveryRecord(readObject(payload.result));
+          const deliveryKind = trimOrEmpty(parsedDelivery.message.kind);
+          const deliveryRequestID = trimOrEmpty(parsedDelivery.message.request_id);
+          if (
+            options.preserveSkillResultRequestId &&
+            deliveryKind === "skill_result" &&
+            deliveryRequestID === options.preserveSkillResultRequestId
+          ) {
+            return payload;
+          }
+          if (parsedDelivery.deliveryId) {
+            await this.nackDelivery(session, parsedDelivery.deliveryId);
           }
         }
         continue;
@@ -982,8 +1001,47 @@ export class MoltenHubClient {
         const message = trimOrEmpty(readObject(payload.error).message) || "unknown error";
         throw new Error(`moltenhub websocket response error (${code}): ${message}`);
       }
-      return;
+      return undefined;
     }
+  }
+
+  private parseDeliveryRecord(record: Record<string, unknown>): ParsedDelivery {
+    const messageRecord = readObject(record.message);
+    const primaryMessage = readObject(record.openclaw_message);
+    const message =
+      Object.keys(primaryMessage).length > 0
+        ? primaryMessage
+        : trimOrEmpty(messageRecord.kind)
+          ? messageRecord
+          : {};
+
+    return {
+      deliveryId: trimOrEmpty(readObject(record.delivery).delivery_id ?? trimOptional(asString(record.delivery_id))),
+      messageId: trimOrEmpty(messageRecord.message_id ?? trimOptional(asString(record.message_id))),
+      message
+    };
+  }
+
+  private toSkillExecutionResult(
+    skillContext: { requestId: string; skillName: string; warnings: SecretWarning[] },
+    delivery: ParsedDelivery
+  ): SkillExecutionResult | undefined {
+    const kind = trimOrEmpty(delivery.message.kind);
+    const resultRequestID = trimOrEmpty(delivery.message.request_id);
+    if (kind !== "skill_result" || resultRequestID !== skillContext.requestId) {
+      return undefined;
+    }
+
+    return {
+      requestId: skillContext.requestId,
+      skillName: skillContext.skillName,
+      status: trimOrEmpty(delivery.message.status) || "ok",
+      output: delivery.message.output,
+      error: delivery.message.error,
+      messageId: delivery.messageId,
+      deliveryId: delivery.deliveryId,
+      warnings: skillContext.warnings.length > 0 ? skillContext.warnings : undefined
+    };
   }
 
   private async ackDelivery(session: WebSocketSession, deliveryID: string, timeoutMs: number): Promise<void> {
