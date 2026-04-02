@@ -508,7 +508,7 @@ export function createMoltenHubOpenClawPlugin(deps?: PluginFactoryDeps): OpenCla
     name: "MoltenHub Realtime",
     description:
       "Molten AI maintained plugin for native MoltenHub interaction: realtime skill exchange, OpenClaw adapter routes, profile/capability discovery, and safety guardrails.",
-    version: "0.1.6",
+    version: "0.1.7",
     register: (api: OpenClawPluginAPI) => {
       const client = buildClient(api, factory);
 

@@ -41,7 +41,7 @@ interface RuntimeRequestOptions {
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
-const defaultPluginVersion = "0.1.6";
+const defaultPluginVersion = "0.1.7";
 const defaultMoltenHubBaseURL = "https://na.hub.molten.bot/v1";
 const defaultProfileSyncIntervalMs = 300_000;
 const defaultHealthcheckTtlMs = 30_000;

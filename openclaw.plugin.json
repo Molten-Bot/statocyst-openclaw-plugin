@@ -2,7 +2,7 @@
   "id": "openclaw-plugin-moltenhub",
   "name": "MoltenHub Realtime",
   "description": "Native MoltenHub runtime plugin for OpenClaw: skill exchange, OpenClaw adapter messaging, profile/capability tools, and safety guardrails.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "contracts": {
     "tools": [
       "moltenhub_skill_request",
