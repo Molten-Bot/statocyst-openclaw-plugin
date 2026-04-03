@@ -26,6 +26,7 @@ Additional behavior:
 
 - prefers realtime websocket transport via MoltenHub `/v1/openclaw/messages/ws`, with documented HTTP publish/pull fallback
 - optional plugin registration (`/v1/openclaw/messages/register-plugin`) when route is available
+- agent lifecycle status updates (prefers `PATCH /v1/agents/me/status`, with compatibility fallback paths) to mark online/offline for caller routing clarity
 - proactive profile sync with `metadata.agent_type=openclaw`
 - baked plugin-native contract metadata under `metadata.plugins.<plugin>.native_contract`
 - secret-safety guardrails (block metadata secret markers, warn on message payload markers)
@@ -177,6 +178,7 @@ Compatibility: `input` is still accepted by this plugin and mapped to `payload` 
 When available, this plugin records usage in MoltenHub:
 
 - `POST /v1/openclaw/messages/register-plugin` is called before readiness-sensitive interactions.
+- agent status update routes are sent with `status=online` on startup and `status=offline` on shutdown (best effort, skipped when unsupported).
 - MoltenHub stores plugin metadata on the agent profile under `metadata.plugins.<plugin_id>`.
 - MoltenHub appends agent activity entries for plugin registration and OpenClaw adapter actions.
 

@@ -9,8 +9,13 @@ export interface OpenClawToolRegisterOptions {
   optional?: boolean;
 }
 
+export type OpenClawPluginCleanup = () => void | Promise<void>;
+
 export interface OpenClawPluginAPI {
   registerTool: (tool: OpenClawToolDefinition, options?: OpenClawToolRegisterOptions) => void;
+  registerCleanup?: (cleanup: OpenClawPluginCleanup) => void;
+  onShutdown?: (cleanup: OpenClawPluginCleanup) => void;
+  onClose?: (cleanup: OpenClawPluginCleanup) => void;
   pluginConfig?: Record<string, unknown>;
   env?: Record<string, string | undefined>;
 }
@@ -20,7 +25,7 @@ export interface OpenClawPlugin {
   name: string;
   description: string;
   version: string;
-  register: (api: OpenClawPluginAPI) => void;
+  register: (api: OpenClawPluginAPI) => void | OpenClawPluginCleanup;
 }
 
 export interface ResolveConfigInput {
@@ -137,3 +142,5 @@ export interface SessionStatusResult {
   sessionKey: string;
   transport: string;
 }
+
+export type AgentRuntimeStatus = "online" | "offline";

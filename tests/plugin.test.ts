@@ -54,6 +54,8 @@ function setupPluginWithMockClient() {
   const openClawAck = vi.fn(async () => ({ status: "acked" }));
   const openClawNack = vi.fn(async () => ({ status: "nacked" }));
   const openClawStatus = vi.fn(async () => ({ message_id: "message-9" }));
+  const markOnline = vi.fn(async () => undefined);
+  const markOffline = vi.fn(async () => undefined);
 
   const plugin = createMoltenHubOpenClawPlugin({
     createClient: () => ({
@@ -69,7 +71,9 @@ function setupPluginWithMockClient() {
       openClawPull,
       openClawAck,
       openClawNack,
-      openClawStatus
+      openClawStatus,
+      markOnline,
+      markOffline
     })
   });
 
@@ -89,6 +93,8 @@ function setupPluginWithMockClient() {
     openClawAck,
     openClawNack,
     openClawStatus,
+    markOnline,
+    markOffline,
     api: {
       pluginConfig: {
         baseUrl: "http://localhost:8080/v1",
@@ -115,6 +121,23 @@ describe("createMoltenHubOpenClawPlugin", () => {
     ctx.plugin.register(ctx.api);
 
     expect(ctx.tools.map((tool) => tool.name)).toEqual([...NATIVE_TOOL_NAMES]);
+  });
+
+  it("signals online on register and offline on lifecycle cleanup", async () => {
+    const ctx = setupPluginWithMockClient();
+    let cleanup: (() => void | Promise<void>) | undefined;
+
+    ctx.plugin.register({
+      ...ctx.api,
+      registerCleanup: (handler) => {
+        cleanup = handler;
+      }
+    });
+
+    expect(ctx.markOnline).toHaveBeenCalledTimes(1);
+    expect(cleanup).toBeDefined();
+    await cleanup?.();
+    expect(ctx.markOffline).toHaveBeenCalledTimes(1);
   });
 
   it("forwards normalized skill request input to the client and returns tool content", async () => {

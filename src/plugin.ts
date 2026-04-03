@@ -1,5 +1,6 @@
 import { resolveConfig, MoltenHubClient } from "./moltenhub-client.js";
 import type {
+  OpenClawPluginCleanup,
   OpenClawPluginAPI,
   OpenClawPlugin,
   OpenClawToolDefinition,
@@ -29,6 +30,8 @@ interface MoltenHubClientContract {
   openClawAck: (request: OpenClawDeliveryActionRequest) => Promise<Record<string, unknown>>;
   openClawNack: (request: OpenClawDeliveryActionRequest) => Promise<Record<string, unknown>>;
   openClawStatus: (request: OpenClawMessageStatusRequest) => Promise<Record<string, unknown>>;
+  markOnline?: () => Promise<void>;
+  markOffline?: () => Promise<void>;
 }
 
 export interface PluginFactoryDeps {
@@ -500,6 +503,16 @@ function buildClient(api: OpenClawPluginAPI, factory: (config: MoltenHubPluginCo
   return factory(config);
 }
 
+function registerLifecycleCleanup(api: OpenClawPluginAPI, cleanup: OpenClawPluginCleanup): void {
+  const registrars = [api.registerCleanup, api.onShutdown, api.onClose];
+  for (const registrar of registrars) {
+    if (typeof registrar === "function") {
+      registrar(cleanup);
+      return;
+    }
+  }
+}
+
 export function createMoltenHubOpenClawPlugin(deps?: PluginFactoryDeps): OpenClawPlugin {
   const factory = deps?.createClient ?? ((config: MoltenHubPluginConfig) => new MoltenHubClient(config));
 
@@ -511,6 +524,9 @@ export function createMoltenHubOpenClawPlugin(deps?: PluginFactoryDeps): OpenCla
     version: "0.1.8",
     register: (api: OpenClawPluginAPI) => {
       const client = buildClient(api, factory);
+      if (typeof client.markOnline === "function") {
+        void client.markOnline();
+      }
 
       api.registerTool(skillRequestTool(() => client));
       api.registerTool(sessionStatusTool(() => client));
@@ -525,6 +541,14 @@ export function createMoltenHubOpenClawPlugin(deps?: PluginFactoryDeps): OpenCla
       api.registerTool(openClawAckTool(() => client));
       api.registerTool(openClawNackTool(() => client));
       api.registerTool(openClawStatusTool(() => client));
+
+      const cleanup: OpenClawPluginCleanup = async () => {
+        if (typeof client.markOffline === "function") {
+          await client.markOffline();
+        }
+      };
+      registerLifecycleCleanup(api, cleanup);
+      return cleanup;
     }
   };
 }

@@ -659,6 +659,107 @@ describe("MoltenHubClient native runtime", () => {
     expect(status).toEqual({ status: "delivered" });
   });
 
+  it("reports online status once and transitions offline on explicit close signal", async () => {
+    const harness = createHarness({
+      config: {
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      }
+    });
+
+    const statusBodies: Array<Record<string, unknown>> = [];
+
+    harness.route("PATCH", "/v1/agents/me/status", (_url, init) => {
+      statusBodies.push(parseBody(init.body) as Record<string, unknown>);
+      return jsonResponse({ ok: true, result: {} });
+    });
+    harness.route("POST", "/v1/openclaw/messages/register-plugin", () => textResponse("ok"));
+    harness.route("GET", "/v1/agents/me/capabilities", () => jsonResponse({ ok: true, result: { can_communicate: true } }));
+
+    await harness.client.getCapabilities();
+    await harness.client.getCapabilities();
+    await harness.client.markOffline();
+    await harness.client.markOffline();
+
+    expect(statusBodies).toEqual([{ status: "online" }, { status: "offline" }]);
+  });
+
+  it("disables agent status updates when update-status route is unavailable", async () => {
+    const harness = createHarness({
+      config: {
+        profile: {
+          enabled: false,
+          syncIntervalMs: 300_000
+        }
+      }
+    });
+
+    harness.route("PATCH", "/v1/agents/me/status", () =>
+      jsonResponse(
+        {
+          error: "route_not_found",
+          error_detail: {
+            code: "route_not_found",
+            message: "missing route"
+          }
+        },
+        404
+      )
+    );
+    harness.route("POST", "/v1/agents/me/status", () =>
+      jsonResponse(
+        {
+          error: "route_not_found",
+          error_detail: {
+            code: "route_not_found",
+            message: "missing route"
+          }
+        },
+        404
+      )
+    );
+    harness.route("POST", "/v1/agents/me/update-status", () =>
+      jsonResponse(
+        {
+          error: "route_not_found",
+          error_detail: {
+            code: "route_not_found",
+            message: "missing route"
+          }
+        },
+        404
+      )
+    );
+    harness.route("POST", "/v1/agents/update-status", () =>
+      jsonResponse(
+        {
+          error: "route_not_found",
+          error_detail: {
+            code: "route_not_found",
+            message: "missing route"
+          }
+        },
+        404
+      )
+    );
+    harness.route("POST", "/v1/openclaw/messages/register-plugin", () => textResponse("ok"));
+    harness.route("GET", "/v1/agents/me/capabilities", () => jsonResponse({ ok: true, result: { can_communicate: true } }));
+
+    await harness.client.getCapabilities();
+    await harness.client.getCapabilities();
+    await harness.client.markOffline();
+
+    const statusCalls = harness.calls.filter(
+      (call) =>
+        call.path === "/v1/agents/me/status" ||
+        call.path === "/v1/agents/me/update-status" ||
+        call.path === "/v1/agents/update-status"
+    );
+    expect(statusCalls).toHaveLength(4);
+  });
+
   it("reuses cached session health checks within configured ttl", async () => {
     const harness = createHarness({
       config: {

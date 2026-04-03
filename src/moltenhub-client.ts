@@ -4,6 +4,7 @@ import { resolve as resolvePath } from "node:path";
 import WebSocket, { type RawData } from "ws";
 
 import type {
+  AgentRuntimeStatus,
   AgentProfileUpdateRequest,
   MoltenHubPluginConfig,
   OpenClawDeliveryActionRequest,
@@ -48,6 +49,11 @@ interface WaitForResponseOptions {
   preserveSkillResultRequestId?: string;
 }
 
+interface AgentStatusRoute {
+  method: "POST" | "PATCH";
+  path: string;
+}
+
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
@@ -55,6 +61,13 @@ const defaultPluginVersion = "0.1.8";
 const defaultProfileSyncIntervalMs = 300_000;
 const defaultHealthcheckTtlMs = 30_000;
 const defaultPullTimeoutMs = 5_000;
+
+const agentStatusRouteCandidates: AgentStatusRoute[] = [
+  { method: "PATCH", path: "/agents/me/status" },
+  { method: "POST", path: "/agents/me/status" },
+  { method: "POST", path: "/agents/me/update-status" },
+  { method: "POST", path: "/agents/update-status" }
+];
 
 const defaultSecretMarkers = [
   "api key",
@@ -193,8 +206,12 @@ export class MoltenHubClient {
   private lastProfileSyncAt = 0;
   private handleFinalizeAttempted = false;
   private pluginRegistrationSupported = true;
+  private agentStatusRouteSupported = true;
   private cachedSessionStatus: SessionStatusResult | null = null;
   private profileSyncInFlight: Promise<void> | null = null;
+  private agentStatusInFlight: Promise<void> | null = null;
+  private lastReportedAgentStatus: AgentRuntimeStatus | null = null;
+  private preferredAgentStatusRoute: AgentStatusRoute | null = null;
 
   constructor(config: MoltenHubPluginConfig, deps?: Partial<MoltenHubClientDeps>) {
     this.config = normalizeRuntimeConfig(config);
@@ -237,11 +254,13 @@ export class MoltenHubClient {
   }
 
   async checkSession(): Promise<SessionStatusResult> {
+    await this.markOnline();
     await this.registerPlugin();
     return this.checkSessionAfterRegistration();
   }
 
   async checkReadiness(): Promise<ReadinessCheckResult> {
+    await this.markOnline();
     const checks = {
       pluginRegistration: readinessItem(),
       profileSync: readinessItem(),
@@ -683,10 +702,67 @@ export class MoltenHubClient {
     return this.runtimeJSON("GET", `/openclaw/messages/${encodeURIComponent(messageID)}`);
   }
 
+  async markOnline(): Promise<void> {
+    await this.reportAgentStatus("online");
+  }
+
+  async markOffline(): Promise<void> {
+    await this.reportAgentStatus("offline");
+  }
+
   private async ensureReady(): Promise<void> {
+    await this.markOnline();
     await this.registerPlugin();
     await this.syncProfileIfDue(false);
     await this.ensureSessionHealthy(false);
+  }
+
+  private async reportAgentStatus(status: AgentRuntimeStatus): Promise<void> {
+    if (!this.agentStatusRouteSupported || this.lastReportedAgentStatus === status) {
+      return;
+    }
+
+    if (this.agentStatusInFlight) {
+      await this.agentStatusInFlight;
+      if (!this.agentStatusRouteSupported || this.lastReportedAgentStatus === status) {
+        return;
+      }
+    }
+
+    const update = (async () => {
+      const routes = this.preferredAgentStatusRoute
+        ? [this.preferredAgentStatusRoute]
+        : [...agentStatusRouteCandidates];
+      let unsupportedCount = 0;
+
+      for (const route of routes) {
+        try {
+          await this.runtimeJSON(route.method, route.path, { status });
+          this.preferredAgentStatusRoute = route;
+          this.lastReportedAgentStatus = status;
+          return;
+        } catch (error) {
+          if (this.isAgentStatusRouteUnsupported(error)) {
+            unsupportedCount += 1;
+            continue;
+          }
+          return;
+        }
+      }
+
+      if (unsupportedCount >= routes.length) {
+        this.agentStatusRouteSupported = false;
+      }
+    })();
+
+    this.agentStatusInFlight = update;
+    try {
+      await update;
+    } finally {
+      if (this.agentStatusInFlight === update) {
+        this.agentStatusInFlight = null;
+      }
+    }
   }
 
   private async ensureSessionHealthy(force: boolean): Promise<void> {
@@ -750,6 +826,30 @@ export class MoltenHubClient {
   private isWebSocketRouteUnsupported(error: unknown): boolean {
     const message = String(error);
     return /unexpected server response:\s*(404|405|426)\b/i.test(message);
+  }
+
+  private isAgentStatusRouteUnsupported(error: unknown): boolean {
+    if (error instanceof MoltenHubAPIError) {
+      if (error.status === 404 || error.status === 405 || error.status === 501) {
+        return true;
+      }
+      const code = trimOrEmpty(error.code).toLowerCase();
+      if (
+        code === "not_found" ||
+        code === "route_not_found" ||
+        code === "method_not_allowed" ||
+        code === "not_implemented"
+      ) {
+        return true;
+      }
+    }
+
+    const text = String(error).toLowerCase();
+    return (
+      text.includes("route_not_found") ||
+      text.includes("method_not_allowed") ||
+      text.includes("not_implemented")
+    );
   }
 
   private async syncProfileIfDue(force: boolean): Promise<void> {
