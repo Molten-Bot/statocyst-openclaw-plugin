@@ -1020,6 +1020,50 @@ describe("MoltenHubClient", () => {
     await expect(client.checkSession()).rejects.toThrow("timed out waiting for websocket open");
   });
 
+  it("disables agent status updates when runtime reports unsupported route codes", async () => {
+    const unsupportedCodes = ["route_not_found", "method_not_allowed", "not_implemented", "not_found"];
+    let unsupportedCodeIndex = 0;
+
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const requestURL = new URL(String(input));
+      if (
+        requestURL.pathname === "/v1/agents/me/status" ||
+        requestURL.pathname === "/v1/agents/me/update-status" ||
+        requestURL.pathname === "/v1/agents/update-status"
+      ) {
+        const errorCode = unsupportedCodes[Math.min(unsupportedCodeIndex, unsupportedCodes.length - 1)];
+        unsupportedCodeIndex += 1;
+        return new Response(JSON.stringify({ error: errorCode, message: "missing route" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const client = new MoltenHubClient(testConfig(), { fetchImpl });
+
+    await client.markOnline();
+    await client.markOffline();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(
+      fetchImpl.mock.calls.map((args) => {
+        const requestURL = new URL(String(args[0]));
+        const requestInit = args[1] as RequestInit | undefined;
+        return `${(requestInit?.method ?? "GET").toUpperCase()} ${requestURL.pathname}`;
+      })
+    ).toEqual([
+      "PATCH /v1/agents/me/status",
+      "POST /v1/agents/me/status",
+      "POST /v1/agents/me/update-status",
+      "POST /v1/agents/update-status"
+    ]);
+  });
+
   it("uses default websocket factory when one is not provided", async () => {
     const client = new MoltenHubClient(
       {
