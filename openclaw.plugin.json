@@ -54,6 +54,11 @@
         "description": "Request timeout in milliseconds",
         "default": 20000
       },
+      "localPrompts": {
+        "type": "string",
+        "format": "textarea",
+        "description": "Optional local prompt JSON for service workflows. Paste an object or array using {repo, base_branch, target_subdir, prompt}."
+      },
       "profile": {
         "type": "object",
         "additionalProperties": false,

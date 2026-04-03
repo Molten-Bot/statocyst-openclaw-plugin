@@ -4,6 +4,7 @@ export { createMoltenHubOpenClawPlugin };
 export { resolveConfig, MoltenHubClient, NATIVE_TOOL_NAMES } from "./moltenhub-client.js";
 export type {
   AgentProfileUpdateRequest,
+  LocalServicePrompt,
   MoltenHubConnectionConfig,
   MoltenHubPluginConfig,
   MoltenHubProfileSyncConfig,

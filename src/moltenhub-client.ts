@@ -5,6 +5,7 @@ import WebSocket, { type RawData } from "ws";
 
 import type {
   AgentProfileUpdateRequest,
+  LocalServicePrompt,
   MoltenHubPluginConfig,
   OpenClawDeliveryActionRequest,
   OpenClawMessageStatusRequest,
@@ -1150,17 +1151,20 @@ export class MoltenHubClient {
 
 function normalizeRuntimeConfig(config: MoltenHubPluginConfig): MoltenHubPluginConfig {
   const unsafe = config as unknown as {
+    localPrompts?: unknown;
     profile?: Partial<MoltenHubPluginConfig["profile"]>;
     connection?: Partial<MoltenHubPluginConfig["connection"]>;
     safety?: Partial<MoltenHubPluginConfig["safety"]>;
   };
 
+  const localPrompts = normalizeLocalPrompts(unsafe.localPrompts, "localPrompts");
   const profile = unsafe.profile ?? {};
   const connection = unsafe.connection ?? {};
   const safety = unsafe.safety ?? {};
 
   return {
     ...config,
+    localPrompts,
     profile: {
       enabled: profile.enabled ?? true,
       handle: trimOptional(profile.handle),
@@ -1216,6 +1220,10 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
   );
   const pluginVersion = trimOrEmpty(
     asString(config.pluginVersion) || asString(fileConfig.pluginVersion) || defaultPluginVersion
+  );
+  const localPrompts = normalizeLocalPrompts(
+    config.localPrompts !== undefined ? config.localPrompts : fileConfig.localPrompts,
+    "localPrompts"
   );
 
   const fileProfile = readObject(fileConfig.profile);
@@ -1301,6 +1309,7 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
     pluginId,
     pluginPackage,
     pluginVersion,
+    localPrompts,
     profile: {
       enabled: profileEnabled,
       handle: profileHandle,
@@ -1559,6 +1568,55 @@ function splitCommaSeparated(value: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+function normalizeLocalPrompts(value: unknown, fieldPath: string): LocalServicePrompt[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    parsed = tryParseJSON(trimmed);
+    if (parsed === undefined) {
+      throw new Error(`MoltenHub plugin configuration ${fieldPath} must be valid JSON`);
+    }
+  }
+
+  const entries = Array.isArray(parsed) ? parsed : isRecord(parsed) ? [parsed] : [];
+  if (entries.length === 0) {
+    throw new Error(`MoltenHub plugin configuration ${fieldPath} must be an object or an array of objects`);
+  }
+
+  return entries.map((entry, index) => normalizeLocalPromptEntry(entry, `${fieldPath}[${index}]`));
+}
+
+function normalizeLocalPromptEntry(value: unknown, fieldPath: string): LocalServicePrompt {
+  if (!isRecord(value)) {
+    throw new Error(`MoltenHub plugin configuration ${fieldPath} must be an object`);
+  }
+
+  const repo = trimOrEmpty(value.repo);
+  const baseBranch = trimOrEmpty(value.base_branch ?? value.baseBranch);
+  const targetSubdir = trimOrEmpty(value.target_subdir ?? value.targetSubdir);
+  const prompt = asString(value.prompt);
+
+  if (!repo || !baseBranch || !targetSubdir || !prompt.trim()) {
+    throw new Error(
+      `MoltenHub plugin configuration ${fieldPath} requires non-empty repo, base_branch, target_subdir, and prompt`
+    );
+  }
+
+  return {
+    repo,
+    base_branch: baseBranch,
+    target_subdir: targetSubdir,
+    prompt
+  };
 }
 
 function normalizeSecretMarkers(customMarkers: string[]): string[] {

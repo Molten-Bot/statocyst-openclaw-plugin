@@ -94,6 +94,7 @@ Config fields:
 - `token` (required unless `configFile` is provided): MoltenHub bearer token for current OpenClaw agent
 - `sessionKey` (optional, default `main`): session key embedded in outbound `skill_request` envelopes
 - `timeoutMs` (optional, default `20000`, max `60000`): request timeout
+- `localPrompts` (optional): local prompt definitions for service workflows. In UI this is a multiline JSON textbox; paste an object or array using `{repo, base_branch, target_subdir, prompt}`.
 - `profile.enabled` (optional, default `true`): enable profile sync
 - `profile.handle` (optional): one-time preferred handle finalize attempt
 - `profile.metadata` (optional): metadata merge patch for `/v1/agents/me/metadata`
@@ -102,6 +103,19 @@ Config fields:
 - `safety.blockMetadataSecrets` (optional, default `true`): block metadata patches with secret-like markers
 - `safety.warnMessageSecrets` (optional, default `true`): attach warnings for secret-like markers in message payloads
 - `safety.secretMarkers` (optional): additive, case-insensitive marker list
+
+`localPrompts` UI textarea example:
+
+```json
+[
+  {
+    "repo": "github.com/acme/platform",
+    "base_branch": "main",
+    "target_subdir": "services/release",
+    "prompt": "Draft release notes and list risky changes for this subtree."
+  }
+]
+```
 
 File-based config example:
 

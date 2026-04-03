@@ -1942,7 +1942,13 @@ describe("MoltenHubClient", () => {
       timeoutMs: 2501,
       pluginId: "plugin-file",
       pluginPackage: "pkg-file",
-      pluginVersion: "9.9.9"
+      pluginVersion: "9.9.9",
+      localPrompts: {
+        repo: "github.com/molten/file",
+        base_branch: "main",
+        target_subdir: "services/agent",
+        prompt: "Summarize open issues for this folder."
+      }
     });
 
     const resolvedFromFile = resolveConfig({
@@ -1958,6 +1964,14 @@ describe("MoltenHubClient", () => {
       pluginId: "plugin-file",
       pluginPackage: "pkg-file",
       pluginVersion: "9.9.9",
+      localPrompts: [
+        {
+          repo: "github.com/molten/file",
+          base_branch: "main",
+          target_subdir: "services/agent",
+          prompt: "Summarize open issues for this folder."
+        }
+      ],
       profile: {
         enabled: true,
         syncIntervalMs: 300000
@@ -1983,11 +1997,25 @@ describe("MoltenHubClient", () => {
       config: {
         configFile: filePath,
         baseURL: "https://inline.example.com/v1/",
-        token: "token-inline"
+        token: "token-inline",
+        localPrompts: JSON.stringify({
+          repo: "github.com/molten/inline",
+          base_branch: "develop",
+          target_subdir: "apps/web",
+          prompt: "Draft release notes for this subtree."
+        })
       }
     });
     expect(resolvedInlineOverridesFile.baseUrl).toBe("https://inline.example.com/v1");
     expect(resolvedInlineOverridesFile.token).toBe("token-inline");
+    expect(resolvedInlineOverridesFile.localPrompts).toEqual([
+      {
+        repo: "github.com/molten/inline",
+        base_branch: "develop",
+        target_subdir: "apps/web",
+        prompt: "Draft release notes for this subtree."
+      }
+    ]);
 
     const resolved = resolveConfig({
       config: {
@@ -2052,6 +2080,68 @@ describe("MoltenHubClient", () => {
       }
     });
     expect(resolvedZeroTimeout.timeoutMs).toBe(20000);
+  });
+
+  it("resolveConfig parses and validates localPrompts textarea JSON", () => {
+    const resolved = resolveConfig({
+      config: {
+        baseUrl: "https://hub.example.com/v1",
+        token: "token-local-prompts",
+        localPrompts: JSON.stringify([
+          {
+            repo: "github.com/molten/one",
+            base_branch: "main",
+            target_subdir: "packages/plugin",
+            prompt: "Find flaky tests and suggest fixes."
+          },
+          {
+            repo: "github.com/molten/two",
+            baseBranch: "release",
+            targetSubdir: "docs",
+            prompt: "Generate changelog bullets from recent commits."
+          }
+        ])
+      }
+    });
+
+    expect(resolved.localPrompts).toEqual([
+      {
+        repo: "github.com/molten/one",
+        base_branch: "main",
+        target_subdir: "packages/plugin",
+        prompt: "Find flaky tests and suggest fixes."
+      },
+      {
+        repo: "github.com/molten/two",
+        base_branch: "release",
+        target_subdir: "docs",
+        prompt: "Generate changelog bullets from recent commits."
+      }
+    ]);
+
+    expect(() =>
+      resolveConfig({
+        config: {
+          baseUrl: "https://hub.example.com/v1",
+          token: "token-local-prompts",
+          localPrompts: "{not json"
+        }
+      })
+    ).toThrow("localPrompts must be valid JSON");
+
+    expect(() =>
+      resolveConfig({
+        config: {
+          baseUrl: "https://hub.example.com/v1",
+          token: "token-local-prompts",
+          localPrompts: JSON.stringify({
+            repo: "github.com/molten/one",
+            base_branch: "main",
+            target_subdir: "packages/plugin"
+          })
+        }
+      })
+    ).toThrow("requires non-empty repo, base_branch, target_subdir, and prompt");
   });
 
   it("resolveConfig fails for unreadable or invalid config files", () => {

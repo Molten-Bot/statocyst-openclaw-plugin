@@ -45,6 +45,13 @@ export interface MoltenHubSafetyConfig {
   secretMarkers: string[];
 }
 
+export interface LocalServicePrompt {
+  repo: string;
+  base_branch: string;
+  target_subdir: string;
+  prompt: string;
+}
+
 export interface MoltenHubPluginConfig {
   baseUrl: string;
   token: string;
@@ -53,6 +60,7 @@ export interface MoltenHubPluginConfig {
   pluginId: string;
   pluginPackage: string;
   pluginVersion: string;
+  localPrompts?: LocalServicePrompt[];
   profile: MoltenHubProfileSyncConfig;
   connection: MoltenHubConnectionConfig;
   safety: MoltenHubSafetyConfig;
