@@ -421,12 +421,13 @@ describe("createMoltenHubOpenClawPlugin", () => {
     expect(tools.length).toBe(NATIVE_TOOL_NAMES.length);
   });
 
-  it("builds client when pluginConfig is omitted and env provides token", () => {
+  it("builds client when pluginConfig is omitted and env provides baseUrl + token", () => {
     const tools: OpenClawToolDefinition[] = [];
     const plugin = createMoltenHubOpenClawPlugin();
 
     plugin.register({
       env: {
+        MOLTENHUB_BASE_URL: "http://localhost:8080/v1",
         MOLTENHUB_AGENT_TOKEN: "token-from-env-only"
       },
       registerTool: (tool) => tools.push(tool)

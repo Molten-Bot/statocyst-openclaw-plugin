@@ -51,8 +51,7 @@ interface WaitForResponseOptions {
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
-const defaultPluginVersion = "0.1.7";
-const defaultMoltenHubBaseURL = "https://na.hub.molten.bot/v1";
+const defaultPluginVersion = "0.1.8";
 const defaultProfileSyncIntervalMs = 300_000;
 const defaultHealthcheckTtlMs = 30_000;
 const defaultPullTimeoutMs = 5_000;
@@ -1202,7 +1201,7 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
       asString(fileConfig.baseURL) ||
       env.MOLTENHUB_BASE_URL ||
       env.MOLTENHUB_API_BASE ||
-      defaultMoltenHubBaseURL
+      ""
   );
   const token = trimOrEmpty(asString(config.token) || asString(fileConfig.token) || env.MOLTENHUB_AGENT_TOKEN || "");
   const sessionKey = trimOrEmpty(
@@ -1285,6 +1284,10 @@ export function resolveConfig(context: ResolveConfigInput): MoltenHubPluginConfi
     ...readStringArray(inlineSafety.secretMarkers),
     ...splitCommaSeparated(asString(env.MOLTENHUB_SECRET_MARKERS))
   ]);
+
+  if (!baseUrl) {
+    throw new Error("MoltenHub plugin configuration requires baseUrl");
+  }
 
   if (!token) {
     throw new Error("MoltenHub plugin configuration requires token");
@@ -1377,7 +1380,7 @@ function normalizeWSRawData(raw: unknown): string {
 function normalizeBaseURL(raw: string): string {
   const trimmed = trimOrEmpty(raw);
   if (!trimmed) {
-    return defaultMoltenHubBaseURL;
+    return "";
   }
   return trimmed.replace(/\/+$/, "");
 }

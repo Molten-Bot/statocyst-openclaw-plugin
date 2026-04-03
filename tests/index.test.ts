@@ -13,12 +13,13 @@ describe("index exports", () => {
     expect(Array.isArray(NATIVE_TOOL_NAMES)).toBe(true);
     expect(NATIVE_TOOL_NAMES).toContain("moltenhub_skill_request");
     expect(plugin.id).toBe("openclaw-plugin-moltenhub");
-    expect(plugin.version).toBe("0.1.7");
+    expect(plugin.version).toBe("0.1.8");
   });
 
   it("re-exports runtime config/client entry points", () => {
     const resolved = resolveConfig({
       config: {
+        baseUrl: "https://hub.example.com/v1",
         token: "token-a"
       }
     });

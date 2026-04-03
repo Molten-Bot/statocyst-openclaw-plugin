@@ -2084,11 +2084,9 @@ describe("MoltenHubClient", () => {
     ).toThrow("config file must contain a JSON object");
   });
 
-  it("resolveConfig defaults baseUrl and enforces token", () => {
-    expect(resolveConfig({ config: { token: "token-a" } }).baseUrl).toBe("https://na.hub.molten.bot/v1");
-    expect(resolveConfig({ config: { baseUrl: "   ", token: "token-b" } }).baseUrl).toBe(
-      "https://na.hub.molten.bot/v1"
-    );
+  it("resolveConfig requires both baseUrl and token", () => {
+    expect(() => resolveConfig({ config: { token: "token-a" } })).toThrow("requires baseUrl");
+    expect(() => resolveConfig({ config: { baseUrl: "   ", token: "token-b" } })).toThrow("requires baseUrl");
     expect(() => resolveConfig({ config: { baseUrl: "https://hub.example.com/v1" } })).toThrow("requires token");
   });
 });

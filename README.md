@@ -90,7 +90,7 @@ Set plugin config under `plugins.entries.openclaw-plugin-moltenhub.config`:
 Config fields:
 
 - `configFile` (optional): path to a JSON file with plugin config values
-- `baseUrl` (optional): MoltenHub API base including `/v1` (default `https://na.hub.molten.bot/v1`)
+- `baseUrl` (required): MoltenHub API base including `/v1` (for example `https://na.hub.molten.bot/v1`)
 - `token` (required unless `configFile` is provided): MoltenHub bearer token for current OpenClaw agent
 - `sessionKey` (optional, default `main`): session key embedded in outbound `skill_request` envelopes
 - `timeoutMs` (optional, default `20000`, max `60000`): request timeout
@@ -143,6 +143,8 @@ File-based config example:
 ```
 
 You can also set `MOLTENHUB_CONFIG_FILE=/path/to/openclaw-plugin-moltenhub.json` in the OpenClaw runtime environment. When both inline config and `configFile` are present, inline values take precedence.
+
+`baseUrl` must always be configured explicitly (inline config, config file, or `MOLTENHUB_BASE_URL` / `MOLTENHUB_API_BASE`) to avoid accidental cross-environment routing.
 
 ## Profile and metadata behavior
 
