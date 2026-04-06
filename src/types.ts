@@ -71,9 +71,20 @@ export interface SkillExecutionRequest {
   payload?: unknown;
   payloadFormat?: "json" | "markdown";
   input?: unknown;
+  awaitResult?: boolean;
   timeoutMs?: number;
   sessionKey?: string;
   requestId?: string;
+}
+
+export interface SkillDispatchResult {
+  mode: "async";
+  requestId: string;
+  skillName: string;
+  status: "queued";
+  messageId: string;
+  warnings?: SecretWarning[];
+  nextAction: string;
 }
 
 export interface SkillExecutionResult {
@@ -86,6 +97,8 @@ export interface SkillExecutionResult {
   deliveryId: string;
   warnings?: SecretWarning[];
 }
+
+export type SkillRequestResult = SkillExecutionResult | SkillDispatchResult;
 
 export interface OpenClawPublishRequest {
   toAgentUUID?: string;

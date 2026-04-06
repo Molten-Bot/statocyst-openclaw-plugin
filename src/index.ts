@@ -18,6 +18,8 @@ export type {
   SecretWarning,
   SkillExecutionRequest,
   SkillExecutionResult,
+  SkillDispatchResult,
+  SkillRequestResult,
   SessionStatusResult,
   OpenClawPublishRequest,
   OpenClawPullRequest,

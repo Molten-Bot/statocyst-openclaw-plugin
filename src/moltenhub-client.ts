@@ -14,6 +14,7 @@ import type {
   ReadinessCheckResult,
   ResolveConfigInput,
   SecretWarning,
+  SkillDispatchResult,
   SessionStatusResult,
   SkillExecutionRequest,
   SkillExecutionResult
@@ -313,7 +314,7 @@ export class MoltenHubClient {
     };
   }
 
-  async requestSkillExecution(request: SkillExecutionRequest): Promise<SkillExecutionResult> {
+  async requestSkillExecution(request: SkillExecutionRequest): Promise<SkillExecutionResult | SkillDispatchResult> {
     const targetUUID = trimOrEmpty(request.toAgentUUID);
     const targetURI = trimOrEmpty(request.toAgentURI);
     const skillName = trimOrEmpty(request.skillName);
@@ -330,8 +331,22 @@ export class MoltenHubClient {
     const payloadInput = request.payload !== undefined ? request.payload : request.input;
     const payload = this.normalizeSkillPayload(payloadInput, request.payloadFormat);
     const warnings = this.maybeWarnPayload(payload.payload, "$.payload");
+    const awaitResult = request.awaitResult ?? true;
 
     await this.ensureReady();
+
+    if (!awaitResult) {
+      return this.dispatchSkillRequestOverPublish({
+        targetUUID,
+        targetURI,
+        skillName,
+        payload: payload.payload,
+        payloadFormat: payload.format,
+        requestId,
+        sessionKey,
+        warnings
+      });
+    }
 
     if (this.cachedSessionStatus?.transport === "http-pull") {
       return this.requestSkillExecutionOverPull({
@@ -386,6 +401,41 @@ export class MoltenHubClient {
     }
   }
 
+  private async dispatchSkillRequestOverPublish(args: {
+    targetUUID: string;
+    targetURI: string;
+    skillName: string;
+    payload: unknown;
+    payloadFormat: "json" | "markdown";
+    requestId: string;
+    sessionKey: string;
+    warnings: SecretWarning[];
+  }): Promise<SkillDispatchResult> {
+    const result = await this.runtimeJSON("POST", "/openclaw/messages/publish", {
+      to_agent_uuid: args.targetUUID || undefined,
+      to_agent_uri: args.targetURI || undefined,
+      client_msg_id: args.requestId,
+      message: this.buildSkillRequestEnvelope({
+        requestId: args.requestId,
+        skillName: args.skillName,
+        payload: args.payload,
+        payloadFormat: args.payloadFormat,
+        sessionKey: args.sessionKey
+      })
+    });
+
+    return {
+      mode: "async",
+      requestId: args.requestId,
+      skillName: args.skillName,
+      status: "queued",
+      messageId: trimOrEmpty(result.message_id),
+      warnings: args.warnings.length > 0 ? args.warnings : undefined,
+      nextAction:
+        "Skill request dispatched asynchronously; use moltenhub_openclaw_pull for skill_result delivery or moltenhub_openclaw_status with messageId."
+    };
+  }
+
   private async requestSkillExecutionOverWebSocket(args: {
     targetUUID: string;
     targetURI: string;
@@ -410,17 +460,13 @@ export class MoltenHubClient {
         request_id: publishRequestID,
         to_agent_uuid: args.targetUUID || undefined,
         to_agent_uri: args.targetURI || undefined,
-        message: {
-          kind: "skill_request",
-          request_id: args.requestId,
-          skill_name: args.skillName,
-          reply_required: true,
+        message: this.buildSkillRequestEnvelope({
+          requestId: args.requestId,
+          skillName: args.skillName,
           payload: args.payload,
-          payload_format: args.payloadFormat,
-          input: args.payload,
-          session_key: args.sessionKey,
-          timestamp: this.deps.now().toISOString()
-        }
+          payloadFormat: args.payloadFormat,
+          sessionKey: args.sessionKey
+        })
       });
 
       const preservedDelivery = await this.waitForResponse(session, publishRequestID, args.timeoutMs, {
@@ -503,17 +549,13 @@ export class MoltenHubClient {
       to_agent_uuid: args.targetUUID || undefined,
       to_agent_uri: args.targetURI || undefined,
       client_msg_id: args.requestId,
-      message: {
-        kind: "skill_request",
-        request_id: args.requestId,
-        skill_name: args.skillName,
-        reply_required: true,
+      message: this.buildSkillRequestEnvelope({
+        requestId: args.requestId,
+        skillName: args.skillName,
         payload: args.payload,
-        payload_format: args.payloadFormat,
-        input: args.payload,
-        session_key: args.sessionKey,
-        timestamp: this.deps.now().toISOString()
-      }
+        payloadFormat: args.payloadFormat,
+        sessionKey: args.sessionKey
+      })
     });
 
     const deadline = Date.now() + args.timeoutMs;
@@ -552,6 +594,26 @@ export class MoltenHubClient {
         });
       }
     }
+  }
+
+  private buildSkillRequestEnvelope(args: {
+    requestId: string;
+    skillName: string;
+    payload: unknown;
+    payloadFormat: "json" | "markdown";
+    sessionKey: string;
+  }): Record<string, unknown> {
+    return {
+      kind: "skill_request",
+      request_id: args.requestId,
+      skill_name: args.skillName,
+      reply_required: true,
+      payload: args.payload,
+      payload_format: args.payloadFormat,
+      input: args.payload,
+      session_key: args.sessionKey,
+      timestamp: this.deps.now().toISOString()
+    };
   }
 
   async getProfile(): Promise<Record<string, unknown>> {

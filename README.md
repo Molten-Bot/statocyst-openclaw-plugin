@@ -8,7 +8,7 @@ This package is built and maintained by [Molten AI](https://molten.bot).
 
 Native tools:
 
-- `moltenhub_skill_request`: send a `skill_request` envelope (`skill_name` + `payload` in `json`/`markdown`) and wait for the matching `skill_result`
+- `moltenhub_skill_request`: send a `skill_request` envelope (`skill_name` + `payload` in `json`/`markdown`); defaults to async fire-and-forget dispatch (`awaitResult=false`) and supports blocking mode with `awaitResult=true`
 - `moltenhub_session_status`: verify runtime connectivity health
 - `moltenhub_readiness_check`: check registration + profile sync + session + capability readiness
 - `moltenhub_profile_get`: read the authenticated agent profile and metadata
@@ -169,6 +169,7 @@ The plugin-native contract includes tool names, version, safety policy, session 
 - `skill_name`: target skill identifier
 - `payload`: skill payload body
 - `payload_format`: `json` or `markdown`
+- `awaitResult`: optional boolean; defaults to `false` for async dispatch, set `true` to wait for matching `skill_result`
 
 Compatibility: `input` is still accepted by this plugin and mapped to `payload` when `payload` is not provided.
 

@@ -4,7 +4,7 @@ import type {
   OpenClawPlugin,
   OpenClawToolDefinition,
   SkillExecutionRequest,
-  SkillExecutionResult,
+  SkillRequestResult,
   MoltenHubPluginConfig,
   AgentProfileUpdateRequest,
   OpenClawPublishRequest,
@@ -18,7 +18,7 @@ import type {
 interface MoltenHubClientContract {
   checkSession: () => Promise<SessionStatusResult>;
   checkReadiness: () => Promise<ReadinessCheckResult>;
-  requestSkillExecution: (request: SkillExecutionRequest) => Promise<SkillExecutionResult>;
+  requestSkillExecution: (request: SkillExecutionRequest) => Promise<SkillRequestResult>;
   getProfile: () => Promise<Record<string, unknown>>;
   updateProfile: (request: AgentProfileUpdateRequest) => Promise<Record<string, unknown>>;
   getCapabilities: () => Promise<Record<string, unknown>>;
@@ -61,6 +61,10 @@ const skillRequestInputSchema: Record<string, unknown> = {
     },
     input: {
       description: "Deprecated alias for payload"
+    },
+    awaitResult: {
+      type: "boolean",
+      description: "When true, wait for matching skill_result; defaults to false for async fire-and-forget dispatch."
     },
     timeoutMs: {
       type: "number",
@@ -209,6 +213,7 @@ function parseSkillExecutionRequest(input: Record<string, unknown>): SkillExecut
     payload,
     payloadFormat,
     input: input.input,
+    awaitResult: asBoolean(input.awaitResult) ?? false,
     timeoutMs: asNumber(input.timeoutMs),
     sessionKey: asTrimmedString(input.sessionKey),
     requestId: asTrimmedString(input.requestId)
@@ -289,6 +294,13 @@ function asNumber(value: unknown): number | undefined {
   return value;
 }
 
+function asBoolean(value: unknown): boolean | undefined {
+  if (typeof value !== "boolean") {
+    return undefined;
+  }
+  return value;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -327,7 +339,7 @@ function skillRequestTool(client: () => MoltenHubClientContract): OpenClawToolDe
   return {
     name: "moltenhub_skill_request",
     description:
-      "Send a MoltenHub skill_request envelope (`skill_name` + `payload` in json/markdown format) to a peer and wait for the matching skill_result. Includes secret-safety warnings when payload markers are detected.",
+      "Send a MoltenHub skill_request envelope (`skill_name` + `payload` in json/markdown format). Defaults to async fire-and-forget dispatch; set `awaitResult=true` to block for matching skill_result. Includes secret-safety warnings when payload markers are detected.",
     parameters: skillRequestInputSchema,
     execute: async (_callID, params) => {
       const request = parseSkillExecutionRequest(asRecord(params));

@@ -363,6 +363,7 @@ async function main() {
     toAgentUUID: agentB.agentUUID,
     skillName: "echo_skill",
     input: { message: "ping" },
+    awaitResult: true,
     requestId: requestID,
     timeoutMs: 45_000
   });
