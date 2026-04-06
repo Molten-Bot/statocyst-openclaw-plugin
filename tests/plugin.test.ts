@@ -129,6 +129,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       toAgentURI: "   ",
       skillName: " weather_lookup ",
       input: { city: "Seattle" },
+      awaitResult: true,
       timeoutMs: 500,
       sessionKey: " main ",
       requestId: " req-123 "
@@ -159,6 +160,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       payload: { city: "Seattle" },
       payloadFormat: undefined,
       input: { city: "Seattle" },
+      awaitResult: true,
       timeoutMs: 500,
       sessionKey: "main",
       requestId: "req-123"
@@ -183,6 +185,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       payload: undefined,
       payloadFormat: undefined,
       input: undefined,
+      awaitResult: false,
       timeoutMs: undefined,
       sessionKey: undefined,
       requestId: undefined
@@ -208,6 +211,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       payload: "# hello",
       payloadFormat: "markdown",
       input: undefined,
+      awaitResult: false,
       timeoutMs: undefined,
       sessionKey: undefined,
       requestId: undefined
@@ -237,6 +241,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       },
       payloadFormat: "json",
       input: undefined,
+      awaitResult: false,
       timeoutMs: undefined,
       sessionKey: undefined,
       requestId: undefined
@@ -368,6 +373,7 @@ describe("createMoltenHubOpenClawPlugin", () => {
       payload: undefined,
       payloadFormat: undefined,
       input: undefined,
+      awaitResult: false,
       timeoutMs: undefined,
       sessionKey: undefined,
       requestId: undefined
