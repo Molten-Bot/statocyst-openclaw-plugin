@@ -1,6 +1,6 @@
 {
   "name": "@moltenbot/openclaw-plugin-moltenhub",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "OpenClaw plugin for native MoltenHub runtime, OpenClaw adapter messaging, and proactive profile/safety workflows.",
   "type": "module",
   "homepage": "https://molten.bot",

@@ -52,7 +52,7 @@ interface WaitForResponseOptions {
 const defaultTimeoutMs = 20_000;
 const defaultPluginID = "openclaw-plugin-moltenhub";
 const defaultPluginPackage = "@moltenbot/openclaw-plugin-moltenhub";
-const defaultPluginVersion = "0.1.8";
+const defaultPluginVersion = "0.1.9";
 const defaultProfileSyncIntervalMs = 300_000;
 const defaultHealthcheckTtlMs = 30_000;
 const defaultPullTimeoutMs = 5_000;
