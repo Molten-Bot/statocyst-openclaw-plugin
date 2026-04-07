@@ -1636,7 +1636,7 @@ describe("MoltenHubClient", () => {
       toAgentUUID: "11111111-1111-1111-1111-111111111111",
       skillName: "top_level_pull",
       payload: {
-        note: "token:abc"
+        note: "token:[redacted]"
       }
     });
 

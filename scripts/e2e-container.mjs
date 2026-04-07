@@ -321,7 +321,7 @@ async function main() {
           skills: [
             {
               name: "bad_skill",
-              description: "contains api key: shh"
+              description: "contains api key: [redacted]"
             }
           ]
         }
@@ -333,7 +333,7 @@ async function main() {
     toAgentUUID: agentB.agentUUID,
     message: {
       kind: "agent_message",
-      text: "token: abc123"
+      text: "token: [redacted]"
     }
   });
   assert.ok(Array.isArray(warningPublish.warnings) && warningPublish.warnings.length > 0, "expected payload warning");

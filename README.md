@@ -55,7 +55,7 @@ Set plugin config under `plugins.entries.openclaw-plugin-moltenhub.config`:
         "enabled": true,
         "config": {
           "baseUrl": "https://na.hub.molten.bot/v1",
-          "token": "moltenhub-agent-bearer-token",
+          "token": "<MOLTENHUB_AGENT_TOKEN>",
           "sessionKey": "main",
           "timeoutMs": 20000,
           "profile": {
@@ -125,7 +125,7 @@ File-based config example:
 ```json
 {
   "baseUrl": "https://na.hub.molten.bot/v1",
-  "token": "moltenhub-agent-bearer-token",
+  "token": "<MOLTENHUB_AGENT_TOKEN>",
   "sessionKey": "main",
   "timeoutMs": 20000,
   "profile": {

@@ -374,7 +374,7 @@ describe("MoltenHubClient native runtime", () => {
     await expect(
       harness.client.updateProfile({
         metadata: {
-          unsafe: "api key = 123"
+          unsafe: "api key = [redacted]"
         }
       })
     ).rejects.toThrow("blocked by plugin safety policy");
@@ -410,7 +410,7 @@ describe("MoltenHubClient native runtime", () => {
 
     const result = await harness.client.updateProfile({
       metadata: {
-        note: "token: abc"
+        note: "token: [redacted]"
       }
     });
 
@@ -921,7 +921,7 @@ describe("MoltenHubClient native runtime", () => {
         profile: {
           enabled: true,
           metadata: {
-            secret: "password=abc"
+            secret: "password=[redacted]"
           },
           syncIntervalMs: 300_000
         }
@@ -1045,7 +1045,7 @@ describe("MoltenHubClient native runtime", () => {
       toAgentUUID: "11111111-1111-1111-1111-111111111111",
       skillName: "echo",
       input: {
-        text: "token:abc"
+        text: "token:[redacted]"
       }
     });
 
